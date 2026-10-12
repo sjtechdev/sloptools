@@ -3,9 +3,9 @@ requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sloptrace"
+name = "sloptools"
 dynamic = ["version"]
-description = "Deterministic complexity-erosion metrics for a Python codebase."
+description = "Deterministic code-quality tools for Python codebases: sloptrace (complexity erosion over git history)."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -28,19 +28,19 @@ dependencies = [
 test = ["pytest"]
 
 [project.scripts]
-sloptrace = "sloptrace.cli:main"
+sloptrace = "sloptools.trace.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/sjtechdev/sloptrace"
-Repository = "https://github.com/sjtechdev/sloptrace"
-Issues = "https://github.com/sjtechdev/sloptrace/issues"
+Homepage = "https://github.com/sjtechdev/sloptools"
+Repository = "https://github.com/sjtechdev/sloptools"
+Issues = "https://github.com/sjtechdev/sloptools/issues"
 
 [tool.setuptools.dynamic]
-version = { attr = "sloptrace.__version__" }
+version = { attr = "sloptools.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["python"]
-exclude = ["sloptrace.tests*"]
+exclude = ["*.tests", "*.tests.*"]
 
 [tool.pytest.ini_options]
-testpaths = ["python/sloptrace/tests"]
+testpaths = ["python/sloptools"]

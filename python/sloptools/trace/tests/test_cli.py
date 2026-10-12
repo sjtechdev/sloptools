@@ -1,6 +1,6 @@
 import json
 
-from sloptrace.cli import main
+from sloptools.trace.cli import main
 
 
 def test_json_output_is_versioned_and_omits_internal_fields(make_tree, tmp_path, capsys):

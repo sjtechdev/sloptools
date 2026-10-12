@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from collections import defaultdict
 
-from sloptrace.config import Config
+from sloptools.trace.config import Config
 
 
 def repeated_literals(tree: ast.AST, config: Config) -> list[dict]:

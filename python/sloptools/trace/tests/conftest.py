@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from sloptrace.config import Config
-from sloptrace.snapshot import analyse_tree
+from sloptools.trace.config import Config
+from sloptools.trace.snapshot import analyse_tree
 
 
 @pytest.fixture

@@ -8,10 +8,10 @@ import json
 import sys
 from pathlib import Path
 
-from sloptrace.config import DEFAULT_EXCLUDES, Config
-from sloptrace.history import analyse_history
-from sloptrace.report import print_report
-from sloptrace.snapshot import Snapshot, analyse_tree
+from sloptools.trace.config import DEFAULT_EXCLUDES, Config
+from sloptools.trace.history import analyse_history
+from sloptools.trace.report import print_report
+from sloptools.trace.snapshot import Snapshot, analyse_tree
 
 JSON_SCHEMA_VERSION = 3
 

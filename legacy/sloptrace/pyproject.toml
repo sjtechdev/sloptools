@@ -1,0 +1,24 @@
+# Transitional package: sloptrace was renamed to sloptools. Installing
+# sloptrace now just installs sloptools, which provides the same `sloptrace`
+# command. Published once, by .github/workflows/publish-legacy-sloptrace.yml.
+
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sloptrace"
+version = "0.2.0"
+description = "Renamed to sloptools. Installing this installs sloptools, which provides the sloptrace command."
+readme = "README.md"
+license = "MIT"
+classifiers = ["Development Status :: 7 - Inactive"]
+authors = [{ name = "sjtechdev" }]
+requires-python = ">=3.9"
+dependencies = ["sloptools>=0.2.0"]
+
+[project.urls]
+Homepage = "https://github.com/sjtechdev/sloptools"
+
+[tool.setuptools]
+packages = []
