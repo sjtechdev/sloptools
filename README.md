@@ -8,7 +8,7 @@ gives the same results.
 |---|---|
 | [`sloptrace`](#sloptrace) | Measures whether a codebase is getting messier, and tracks it over git history. |
 
-Formerly published as `sloptrace`; that package now just installs `sloptools`.
+Formerly published as `sloptrace` (up to 0.1.0); install `sloptools` instead.
 
 ## Install
 
