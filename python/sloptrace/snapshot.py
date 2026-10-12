@@ -12,7 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sloptrace import clones, imports, literals, similar, sloc
+from sloptrace import clones, imports, literals, sloc
 from sloptrace.complexity import FunctionStat, cognitive_lookup, function_stats, no_cognitive
 from sloptrace.config import Config
 from sloptrace.discover import ModuleIndex, list_python_files
@@ -25,7 +25,6 @@ class FileFacts:
     functions: list[FunctionStat] = field(default_factory=list)
     fingerprints: dict = field(default_factory=dict)
     windows: dict = field(default_factory=dict)
-    shapes: dict = field(default_factory=dict)       # key -> similar.FunctionShape (cross-repo only)
     literal_repeats: list = field(default_factory=list)
     literal_lists: list = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)   # partial-analysis failures
@@ -55,8 +54,6 @@ def analyse_file(rel: str, src: str, config: Config) -> FileFacts | None:
     facts.imports = imports.collect_imports(tree)
     facts.fingerprints = clones.collect_fingerprints(tree, rel, config)
     facts.windows = clones.block_clone_windows(tree, rel, config.clone_window)
-    if config.collect_shapes:
-        facts.shapes = similar.collect_shapes(tree, rel, config)
     facts.literal_repeats = [{**hit, "file": rel} for hit in literals.repeated_literals(tree, config)]
     facts.literal_lists = literals.find_literal_lists(tree, rel, config)
     return facts
@@ -97,9 +94,6 @@ class Snapshot:
     type_only_imports: int = 0   # under `if TYPE_CHECKING:`, never run
     deferred_imports: int = 0    # inside function bodies, run on call
     sccs: list = field(default_factory=list)      # [{modules: [paths], cycle: [a, b, ..., a]}]
-
-    # -- code shared with other repos (--with only) --
-    cross_repo: dict = field(default_factory=dict)   # {repos, function_clones, block_clones, column_lists}
 
     # -- deltas (history mode only) --
     delta_erosion_pct: float | None = None
@@ -179,10 +173,9 @@ def aggregate(facts: list[FileFacts], ref: str, config: Config, parse_errors: in
     return snap
 
 
-def collect_facts(root: Path, config: Config, label: str = "") -> tuple[list[FileFacts], int]:
+def collect_facts(root: Path, config: Config) -> tuple[list[FileFacts], int]:
     """Per-file facts for every .py file under `root`, plus the count of
-    files that could not be read or parsed. With a `label`, file paths are
-    recorded as "label:path" so several roots can share one pool."""
+    files that could not be read or parsed."""
     facts, parse_errors = [], 0
     for rel in list_python_files(root, config.excludes):
         try:
@@ -190,7 +183,7 @@ def collect_facts(root: Path, config: Config, label: str = "") -> tuple[list[Fil
         except OSError:
             parse_errors += 1
             continue
-        f = analyse_file(f"{label}:{rel}" if label else rel, src, config)
+        f = analyse_file(rel, src, config)
         if f is None:
             parse_errors += 1
         else:
