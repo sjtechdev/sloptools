@@ -10,9 +10,9 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-from sloptrace.clones import find_divergent_clones
-from sloptrace.config import Config
-from sloptrace.snapshot import Snapshot, analyse_tree
+from sloptools.trace.clones import find_divergent_clones
+from sloptools.trace.config import Config
+from sloptools.trace.snapshot import Snapshot, analyse_tree
 
 
 def git(repo: Path, *args: str) -> str:

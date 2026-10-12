@@ -5,9 +5,9 @@ from __future__ import annotations
 import sys
 from typing import TextIO
 
-from sloptrace.complexity import HAVE_COGNITIVE
-from sloptrace.config import Config
-from sloptrace.snapshot import Snapshot
+from sloptools.trace.complexity import HAVE_COGNITIVE
+from sloptools.trace.config import Config
+from sloptools.trace.snapshot import Snapshot
 
 
 def _module_label(rel: str) -> str:

@@ -10,7 +10,7 @@ import ast
 import hashlib
 from collections import defaultdict
 
-from sloptrace.config import Config
+from sloptools.trace.config import Config
 
 Span = tuple[str, int, int]   # (file, first line, last line)
 
