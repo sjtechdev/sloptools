@@ -8,7 +8,7 @@ def test_json_output_is_versioned_and_omits_internal_fields(make_tree, tmp_path,
     out = tmp_path / "out.json"
     assert main([str(root), "-o", str(out)]) == 0
     payload = json.loads(out.read_text())
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     snap = payload["snapshots"][0]
     assert snap["functions"] == 1
     assert "func_fingerprints" not in snap
