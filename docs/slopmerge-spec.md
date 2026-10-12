@@ -1,6 +1,7 @@
 # slopmerge: spec
 
-> Working name. Status: draft, nothing implemented yet.
+> Status: draft, nothing implemented yet. Part of the `sloptools` package,
+> alongside `sloptrace`.
 
 slopmerge finds Python code that has been duplicated, either copied or
 reimplemented, across one or more codebases, and reports it as groups of
@@ -43,24 +44,28 @@ leaves the judgement to the skill.
 
 ## Relationship to sloptrace
 
-slopmerge lives in the sloptrace repo but is an **independent package**:
-it has its own `pyproject.toml`, version, CLI, tests and PyPI release, and
-it does not import `sloptrace`. Where it needs the same building blocks
-(file discovery, the AST normaliser, block-window hashing), it starts from a
-copy of sloptrace's code, so either tool can change without breaking the
-other.
+slopmerge is a second tool in the `sloptools` package. It is installed with
+it (`pip install sloptools`), shares its version and release, and gets its
+own command, `slopmerge`, next to `sloptrace`.
+
+The two tools share code through `sloptools.common` rather than importing
+each other. The building blocks both need move there out of
+`sloptools.trace` as part of milestone 1: file discovery and exclusion rules,
+the AST normaliser (`_Normaliser`, `body_fingerprint`), and block-window
+hashing. sloptrace's behaviour must not change as a result; its existing
+tests guard that.
 
 ```
-slopmerge/
-  pyproject.toml
-  README.md
-  SPEC.md
-  python/slopmerge/
-    __init__.py         # __version__
+python/sloptools/
+  __init__.py           # __version__, shared by every tool
+  common/
+    discover.py         # roots -> files, exclusion rules
+    normalise.py        # AST normalisation shared by both tools
+  trace/                # sloptrace
+  merge/                # slopmerge
     cli.py
-    discover.py         # roots -> files (adapted from sloptrace)
     units.py            # AST -> functions, classes, blocks, constant tables
-    normalise.py        # the three normalisation levels
+    levels.py           # N0/N1/N2 statement sequences, built on common.normalise
     index.py            # IDF weights, candidate generation
     match.py            # scoring, tiers, clustering
     evidence.py         # differences, parameters, dependencies
@@ -236,7 +241,7 @@ without first re-deriving the facts from the source:
 ```json
 {
   "schema_version": 1,
-  "tool": {"name": "slopmerge", "version": "0.1.0"},
+  "tool": {"name": "slopmerge", "version": "0.3.0"},
   "settings": {"min_similarity": 0.6, "min_statements": 3, "units": ["functions", "blocks", "classes", "constants"]},
   "roots": [{"label": "api", "path": "/abs/path/api", "files": 182}],
   "groups": [
@@ -322,29 +327,30 @@ It is not a stable interface.
 
 ## Packaging and release
 
-- PyPI name `slopmerge`, own version (starts at `0.1.0`), Python ≥3.9, no
-  runtime dependencies beyond the standard library.
-- **Release tags are prefixed per package**: `slopmerge-v0.1.0`, and
-  sloptrace switches to `sloptrace-v…`. The publish workflow is split in
-  two, each triggered by its own tag prefix and building from its own
-  directory. PyPI trusted publishing needs a second publisher registered
-  for `slopmerge`.
-- CI runs both packages' test suites.
+- Ships in `sloptools` as a second console script,
+  `slopmerge = "sloptools.merge.cli:main"`. It uses the package version
+  (`tool.version` in the JSON output is `sloptools.__version__`), and the
+  first release to include it is a minor bump. No release-process changes
+  are needed.
+- `sloptools.merge` uses only the standard library. sloptrace's `radon` and
+  `complexipy` dependencies stay confined to `sloptools.trace`.
+- The README gains a slopmerge row in the tools table and its own section.
 
 ## Milestones
 
-1. Package scaffold, discovery, function units, `exact` and `renamed`
-   tiers, JSON output.
+1. Move the shared building blocks into `sloptools.common` (sloptrace's tests
+   still pass, unchanged). Then the `sloptools.merge` scaffold and
+   `slopmerge` command, function units, `exact` and `renamed` tiers, and
+   JSON output.
 2. IDF weights, candidate index, `near` tier, grouping, `differences` and
    `parameters`.
 3. Boilerplate rules and the fixture corpus with precision and recall floors.
 4. Blocks, constants and classes.
 5. `related` tier and `uses`.
-6. Text report, performance pass, packaging, release workflow.
+6. Text report, performance pass, README.
 
 ## Open questions
 
-- **Name.** `slopmerge` is a placeholder.
 - **Default output.** The spec says text by default and `--json` for the
   skill. JSON by default would make sense if the skill is the main user.
 - **Tests.** Excluded by default (as in sloptrace), but duplicated test
