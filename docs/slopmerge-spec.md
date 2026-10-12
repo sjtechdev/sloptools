@@ -348,11 +348,3 @@ It is not a stable interface.
 4. Blocks, constants and classes.
 5. `related` tier and `uses`.
 6. Text report, performance pass, README.
-
-## Open questions
-
-- **Default output.** The spec says text by default and `--json` for the
-  skill. JSON by default would make sense if the skill is the main user.
-- **Tests.** Excluded by default (as in sloptrace), but duplicated test
-  helpers and fixtures are a real consolidation target. Should the skill
-  scan tests in a separate pass?
