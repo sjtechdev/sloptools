@@ -23,6 +23,9 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("-o", "--output", type=Path, default=None, help="also write JSON here")
     ap.add_argument("--min-statements", type=int, default=3, metavar="N",
                     help="smallest function considered, in statements (default 3)")
+    ap.add_argument("--min-similarity", type=float, default=0.6, metavar="T",
+                    help="lowest similarity (0-1] for a near copy (default 0.6; 1 reports only "
+                         "exact and renamed copies)")
     ap.add_argument("--cross-root-only", action="store_true",
                     help="only report groups that span two or more roots")
     ap.add_argument("--include-tests", action="store_true", help="scan test files too")
@@ -50,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"{p} is not a directory")
     if clash := _overlap(paths):
         parser.error(f"roots overlap: {clash[0]} and {clash[1]}")
+    if not 0 < args.min_similarity <= 1:
+        parser.error("--min-similarity must be in (0, 1]")
     if args.min_statements < 1 or args.max_group_size < 2:
         parser.error("--min-statements must be at least 1 and --max-group-size at least 2")
 
@@ -57,11 +62,11 @@ def main(argv: list[str] | None = None) -> int:
     roots = label_roots(paths)
     functions, files, warnings = collect(roots, excludes, args.include_tests)
     order = {r.label: i for i, r in enumerate(roots)}
-    groups, subsumed = find_groups(functions, order, args.min_statements)
+    groups, subsumed = find_groups(functions, order, args.min_statements, args.min_similarity)
     if args.cross_root_only:
         groups = [g for g in groups if len(g.roots) > 1]
 
-    settings = {"min_statements": args.min_statements, "units": ["functions"],
+    settings = {"min_similarity": args.min_similarity, "min_statements": args.min_statements, "units": ["functions"],
                 "cross_root_only": args.cross_root_only, "include_tests": args.include_tests,
                 "excludes": list(excludes)}
     result = to_json(roots, files, functions, groups, subsumed, warnings, settings, args.max_group_size)

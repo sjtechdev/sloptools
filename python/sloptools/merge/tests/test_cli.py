@@ -24,11 +24,12 @@ def test_output_shape(run):
     assert [r["label"] for r in out["roots"]] == ["shop"]
     assert out["roots"][0]["files"] == 1
     assert out["stats"]["units"] == {"function": 2}
-    assert out["stats"]["groups_by_tier"] == {"exact": 1, "renamed": 0}
+    assert out["stats"]["groups_by_tier"] == {"exact": 1, "renamed": 0, "near": 0}
     [g] = out["groups"]
     assert g["id"] == "g1" and g["unit"] == "function" and g["member_count"] == 2
     assert g["members"][0] == {"id": "m1", "root": "shop", "file": "cart.py", "qualname": "total_a",
-                               "lines": [2, 6], "sloc": 5, "is_method": False, "variant": 1}
+                               "lines": [2, 6], "sloc": 5, "is_method": False, "variant": 1,
+                               "shape": 1, "similarity": 1.0}
 
 
 def test_root_labels_are_unique(make_roots, capsys):
@@ -100,5 +101,5 @@ def test_text_summary(make_roots, capsys):
     [root] = make_roots({"shop": {"cart.py": TWO}})
     assert main([str(root)]) == 0
     text = capsys.readouterr().out
-    assert "1 duplicate group(s): 1 exact, 0 renamed" in text
+    assert "1 duplicate group(s): 1 exact, 0 renamed, 0 near" in text
     assert "shop:cart.py:2-6" in text and "total_a" in text

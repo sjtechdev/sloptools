@@ -68,14 +68,16 @@ paper's published baselines.
 ## slopmerge
 
 Finds functions that have been copied, within one codebase or across
-several, and reports each set of copies as a group: where every copy is, and
-what differs between them. It's built to feed a Claude skill that decides
+several, including copies that have drifted since, and reports each set of
+copies as a group: where every copy is, how similar it is, and what differs
+between them. It's built to feed a Claude skill that decides
 what to consolidate, but the text summary works on its own too.
 
 ```bash
 slopmerge .                                # duplication within one codebase
 slopmerge ../api ../worker ../shared       # ...and between several (all treated as equals)
 slopmerge ../api ../worker --cross-root-only   # only code shared between them
+slopmerge . --min-similarity 0.8           # only close near-copies (default 0.6)
 slopmerge . --json                         # machine-readable output
 slopmerge --help                           # all options
 ```
@@ -86,10 +88,10 @@ Each group has a tier:
 |---|---|
 | **exact** | Identical apart from formatting, comments, docstrings, type annotations and decorators. |
 | **renamed** | Identical apart from local names and literal values. The literals and outside names that differ are listed: they're what a merged function would take as arguments. |
+| **near** | The same code with statements added, removed or changed, scored 0–1 against the group's most typical copy. Statements found all over the codebase count for little, so shared boilerplate alone doesn't make a match. The runs of statements that differ are located for each copy. |
 
-Matching of copies that have drifted (statements added, removed or changed),
-duplicated blocks inside functions, classes and constant tables is planned;
-see the [spec](docs/slopmerge-spec.md).
+Filtering of common boilerplate, duplicated blocks inside functions, classes
+and constant tables are planned; see the [spec](docs/slopmerge-spec.md).
 
 ## Development
 

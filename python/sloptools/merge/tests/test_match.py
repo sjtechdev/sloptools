@@ -76,7 +76,7 @@ def test_renamed_copy_reports_the_literal_that_differs(run):
     assert {p["kind"] for p in g["parameters"]} == {"literal", "rename"}
 
 
-def test_different_called_class_is_not_a_renamed_copy(run):
+def test_different_called_class_is_a_near_copy_not_a_renamed_one(run):
     src = '''
     def make_{n}(a, b):
         x = a + b
@@ -84,7 +84,10 @@ def test_different_called_class_is_not_a_renamed_copy(run):
         return {cls}(x, y)
     '''
     out = run({"r": {"m.py": src.format(n="one", cls="One") + src.format(n="two", cls="Two")}})
-    assert groups(out) == []
+    [g] = groups(out)
+    assert g["tier"] == "near"
+    assert run({"r2": {"m.py": src.format(n="one", cls="One") + src.format(n="two", cls="Two")}},
+               "--min-similarity", "1")["groups"] == []
 
 
 def test_reference_kind_for_passed_global(run):
@@ -100,9 +103,11 @@ def test_reference_kind_for_passed_global(run):
     assert ref["values"] == {"m1": "USERS", "m2": "JOBS"}
 
 
-def test_same_shape_different_operation_does_not_match(run):
+def test_same_shape_different_operation_is_near_with_the_change_located(run):
     out = run({"api": {"db.py": FETCH}, "worker": {"jobs.py": FETCH_OTHER_OP}})
-    assert groups(out) == []
+    [g] = groups(out)
+    assert g["tier"] == "near"
+    assert g["differences"] == [{"member": "m2", "change": "changed", "lines": [6, 6], "medoid_lines": [7, 7]}]
 
 
 def test_small_functions_are_ignored(run):
@@ -153,7 +158,9 @@ def test_cross_root_only(run):
     roots = {"a": {"x.py": FETCH, "y.py": FETCH}, "b": {"z.py": FETCH_RENAMED}}
     assert len(groups(run(roots))) == 1
     roots2 = {"c": {"x.py": FETCH, "y.py": FETCH}, "d": {"z.py": FETCH_OTHER_OP}}
-    assert groups(run(roots2, "--cross-root-only")) == []
+    assert groups(run(roots2, "--cross-root-only", "--min-similarity", "1")) == []
+    [g] = groups(run({"e": roots2["c"], "f": roots2["d"]}, "--cross-root-only"))
+    assert g["tier"] == "near" and g["roots"] == ["e", "f"]
 
 
 def test_variants_and_medoid_pick_the_most_common_form(run):
@@ -175,3 +182,93 @@ def small_{n}(a):
                      "c.py": small.format(n="x") + small.format(n="y"), "d.py": FETCH, "e.py": FETCH}})
     assert [(g["tier"], g["member_count"], g["savings"]) for g in groups(out)] == [
         ("exact", 2, 4), ("renamed", 4, 18)]
+
+
+def test_a_function_and_one_nested_inside_it_never_share_a_group(run):
+    # m is close to both the nested callback and the factory around it; the
+    # callback and its factory must not end up in m's group together
+    src = """
+def m(match):
+    text = match.group(0)
+    lexer.push(text)
+    lexer.pos = match.end()
+    return text
+
+
+def make(lexer):
+    def callback(match):
+        text = match.group(0)
+        lexer.push(text)
+        lexer.pos = match.end()
+        lexer.count += 1
+        return text
+    return callback
+"""
+    [g] = groups(run({"r": {"m.py": src}}))
+    assert [m["qualname"] for m in g["members"]] == ["m", "make.callback"]
+
+
+def _steps(name: str, steps: str) -> str:
+    """A function made of distinct, rare statements: one call per step."""
+    body = "".join(f"    v = step_{s}(v)\n" for s in steps.split())
+    return f"\ndef {name}(v):\n{body}    return v\n"
+
+
+def test_drifted_copy_is_near_with_added_and_removed_runs(run):
+    # drift inserts x, y after b and drops e
+    src = _steps("orig", "a b c d e f") + _steps("drift", "a b x y c d f")
+    [g] = groups(run({"r": {"m.py": src}}))
+    assert g["tier"] == "near" and 0.6 <= g["similarity"]["min"] < 1
+    assert [m["qualname"] for m in g["members"]] == ["orig", "drift"] and g["medoid"] == "m1"
+    assert g["differences"] == [
+        {"member": "m2", "change": "added", "lines": [14, 15]},
+        {"member": "m2", "change": "removed", "medoid_lines": [7, 7]},
+    ]
+
+
+def test_chained_similarity_is_split_at_the_medoid(run):
+    # A~B, B~C, C~D, but A and D share almost nothing
+    src = (_steps("a", "p q r s t u") + _steps("b", "r s t u v w")
+           + _steps("c", "t u v w x y") + _steps("d", "v w x y z zz"))
+    out = run({"r": {"m.py": src}})
+    for g in groups(out):
+        names = {m["qualname"] for m in g["members"]}
+        assert not {"a", "d"} <= names
+        assert all(m["similarity"] >= 0.6 for m in g["members"])
+    assert [sorted(m["qualname"] for m in g["members"]) for g in groups(out)] == [["a", "b", "c"]]
+
+
+def test_near_group_absorbs_renamed_copies_and_labels_their_shape(run):
+    src = (_steps("one", "a b c d e") + _steps("two", "a b c d e").replace("v", "w")
+           + _steps("three", "a b c d x"))
+    out = run({"r": {"m.py": src}})
+    [g] = groups(out)        # no separate renamed group for one/two
+    assert g["tier"] == "near"
+    by_name = {m["qualname"]: m for m in g["members"]}
+    assert by_name["one"]["shape"] == by_name["two"]["shape"] != by_name["three"]["shape"]
+    assert by_name["one"]["variant"] != by_name["two"]["variant"]
+    assert by_name["one"]["similarity"] == by_name["two"]["similarity"] == 1.0
+
+
+def test_parameters_of_near_copies_cover_matched_statements_only(run):
+    src = '''
+def load_users(db):
+    rows = db.query("users")
+    rows = [r for r in rows if r.active]
+    db.log("loaded")
+    return rows
+
+
+def load_jobs(db):
+    rows = db.query("jobs")
+    rows = [r for r in rows if r.active]
+    db.audit()
+    db.log("loaded")
+    return rows
+'''
+    [g] = groups(run({"r": {"m.py": src}}))
+    assert g["tier"] == "near"
+    literals = [p["values"] for p in g["parameters"] if p["kind"] == "literal"]
+    assert literals == [{"m1": "users", "m2": "jobs"}]
+    [d] = g["differences"]
+    assert d["change"] in ("added", "removed")

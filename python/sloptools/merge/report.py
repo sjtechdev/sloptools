@@ -14,9 +14,10 @@ SCHEMA_VERSION = 1
 TEXT_TOP_N = 20
 
 
-def _member(f: Function, mid: str, variant: int) -> dict:
+def _member(f: Function, mid: str, variant: int, shape: int, similarity: float) -> dict:
     return {"id": mid, "root": f.root, "file": f.rel, "qualname": f.qualname,
-            "lines": [f.lo, f.hi], "sloc": f.sloc, "is_method": f.is_method, "variant": variant}
+            "lines": [f.lo, f.hi], "sloc": f.sloc, "is_method": f.is_method,
+            "variant": variant, "shape": shape, "similarity": similarity}
 
 
 def _group(g: Group, gid: str, max_size: int) -> dict:
@@ -25,20 +26,24 @@ def _group(g: Group, gid: str, max_size: int) -> dict:
     if g.medoid not in picked:
         picked[-1] = g.medoid
     shown = [g.members[i] for i in picked]
-    variants = [g.variants[i] for i in picked]
     ids = [f"m{i}" for i in range(1, len(shown) + 1)]
+    medoid = picked.index(g.medoid)
+    alignment = [g.alignment[i] for i in picked]
+    lo, hi = g.similarity_range
     out = {
         "id": gid,
         "unit": "function",
         "tier": g.tier,
-        "similarity": {"min": 1.0, "max": 1.0},
+        "similarity": {"min": lo, "max": hi},
         "cross_root": len(g.roots) > 1,
         "roots": g.roots,
         "savings": g.savings,
-        "medoid": ids[picked.index(g.medoid)],
+        "medoid": ids[medoid],
         "member_count": len(g.members),
-        "members": [_member(f, i, v) for f, i, v in zip(shown, ids, variants)],
-        "parameters": [] if g.tier == "exact" else evidence.parameters(shown, ids),
+        "members": [_member(g.members[p], i, g.variants[p], g.shapes[p], g.similarity[p])
+                    for p, i in zip(picked, ids)],
+        "parameters": [] if g.tier == "exact" else evidence.parameters(shown, ids, medoid, alignment),
+        "differences": evidence.differences(shown, ids, medoid, alignment) if g.tier == "near" else [],
         "children": [],
     }
     if len(shown) < len(g.members):
@@ -81,10 +86,12 @@ def print_text(result: dict, out: TextIO) -> None:
 
     for g in groups[:TEXT_TOP_N]:
         roots = ", ".join(g["roots"])
-        w(f"\n{g['tier'].upper():<8} {g['member_count']} copies, ~{g['savings']} lines   [{roots}]\n")
+        sim = f"{g['similarity']['min']:.0%}-{g['similarity']['max']:.0%} similar, " if g["tier"] == "near" else ""
+        w(f"\n{g['tier'].upper():<8} {g['member_count']} copies, {sim}~{g['savings']} lines   [{roots}]\n")
         for m in g["members"]:
             mark = "*" if m["id"] == g["medoid"] else " "
-            w(f"  {mark} {_location(m):<60} {m['qualname']}\n")
+            pct = f"{m['similarity']:>5.0%}" if g["tier"] == "near" else ""
+            w(f"  {mark} {_location(m):<60} {pct} {m['qualname']}\n")
         if g.get("truncated"):
             w(f"    ... {g['member_count'] - len(g['members'])} more\n")
         params = [p for p in g["parameters"] if p["kind"] != "rename"]
@@ -92,7 +99,9 @@ def print_text(result: dict, out: TextIO) -> None:
             vals = " / ".join(repr(v) for v in p["values"].values())
             w(f"    differs ({p['kind']}): {vals}\n")
         if len(params) > 3:
-            w(f"    ... {len(params) - 3} more difference(s)\n")
+            w(f"    ... {len(params) - 3} more differing value(s)\n")
+        if g["differences"]:
+            w(f"    {len(g['differences'])} statement run(s) added, removed or changed; see --json\n")
     if len(groups) > TEXT_TOP_N:
         w(f"\n... {len(groups) - TEXT_TOP_N} more group(s); see --json\n")
     if groups:
