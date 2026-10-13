@@ -224,9 +224,19 @@ without first re-deriving the facts from the source:
   with line numbers. This tells the skill what would need to become a
   parameter or a branch.
 - **`parameters`** (`renamed`, `near`): positions where the members differ
-  only in a literal or a name, with the value in each member, e.g.
-  `{"kind": "literal", "values": {"m1": "users", "m2": "orders"}}`. These
-  are the arguments a merged function would take.
+  only in a literal or a name, with the value and line in each member, e.g.
+  `{"kind": "literal", "values": {"m1": "users", "m2": "orders"}, ...}`.
+  The same difference repeated is reported once, with a `count`. `kind` is
+  one of:
+  - `literal`: a constant differs. This is an argument a merged function
+    would take.
+  - `reference`: a name that, in at least one member, comes from outside
+    the function (a module constant, a class, a helper) differs. This is
+    also an argument, or a dependency to inject.
+  - `rename`: a name every member binds itself (a parameter, a local)
+    differs. This is cosmetic, and no argument is needed.
+- **`variant`** per member: members with the same N0 form share a variant
+  number, so a `renamed` group shows which copies are verbatim.
 - **`uses`** per member: the module globals, imported names and `self`
   attributes it reads, and whether it is a method. This lets the skill judge
   whether a member could move somewhere shared, and what it would drag along.
@@ -254,21 +264,22 @@ without first re-deriving the facts from the source:
       "roots": ["api", "worker"],
       "savings": 54,
       "medoid": "m1",
+      "member_count": 2,
       "members": [
-        {"id": "m1", "root": "api", "file": "api/db.py", "qualname": "fetch_rows",
-         "lines": [12, 40], "sloc": 27, "is_method": false,
+        {"id": "m1", "root": "api", "file": "db.py", "qualname": "fetch_rows",
+         "lines": [12, 40], "sloc": 27, "is_method": false, "variant": 1,
          "uses": {"imports": ["sqlalchemy.text"], "globals": ["ENGINE"], "self_attrs": []}},
-        {"id": "m2", "root": "worker", "file": "worker/store.py", "qualname": "Store.load",
-         "lines": [88, 119], "sloc": 30, "is_method": true,
+        {"id": "m2", "root": "worker", "file": "store.py", "qualname": "Store.load",
+         "lines": [88, 119], "sloc": 30, "is_method": true, "variant": 2,
          "uses": {"imports": ["sqlalchemy.text"], "globals": [], "self_attrs": ["engine"]}}
       ],
       "pairs": [{"a": "m1", "b": "m2", "similarity": 0.81}],
-      "parameters": [{"kind": "literal", "values": {"m1": "users", "m2": "jobs"}, "lines": {"m1": 15, "m2": 92}}],
+      "parameters": [{"kind": "literal", "values": {"m1": "users", "m2": "jobs"}, "lines": {"m1": 15, "m2": 92}, "count": 1}],
       "differences": [{"member": "m2", "change": "added", "lines": [101, 104]}],
       "children": []
     }
   ],
-  "stats": {"files": 412, "units": {"function": 3120, "block": 0, "class": 240, "constant": 95}, "groups_by_tier": {"exact": 4, "renamed": 9, "near": 21, "related": 12}},
+  "stats": {"files": 412, "units": {"function": 3120, "block": 0, "class": 240, "constant": 95}, "groups_by_tier": {"exact": 4, "renamed": 9, "near": 21, "related": 12}, "subsumed": 7},
   "warnings": []
 }
 ```
@@ -276,6 +287,9 @@ without first re-deriving the facts from the source:
 - `file` is relative to its root. `lines` are inclusive and 1-based.
 - `children` holds subsumed matches: a class group's method matches.
 - `pairs` is omitted for `exact` and `renamed` (every pair is 1.0).
+- A group with more than `--max-group-size` members lists only that many,
+  with `"truncated": true`. `member_count` is always the full count.
+- `stats.subsumed` counts groups dropped by the subsumption rule.
 - Groups are sorted by tier (`exact` → `related`), then by `savings`
   descending, then by first location. The same input always gives the same
   output, byte for byte.

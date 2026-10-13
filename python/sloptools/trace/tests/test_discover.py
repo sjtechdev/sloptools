@@ -3,8 +3,8 @@ import subprocess
 
 import pytest
 
-from sloptools.trace.config import DEFAULT_EXCLUDES
-from sloptools.trace.discover import ModuleIndex, list_python_files
+from sloptools.common.discover import DEFAULT_EXCLUDES, list_python_files
+from sloptools.trace.discover import ModuleIndex
 
 
 def test_excludes_tests_hidden_dirs_and_default_segments(make_tree):

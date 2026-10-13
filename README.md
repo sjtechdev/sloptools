@@ -7,6 +7,7 @@ gives the same results.
 | Tool | What it does |
 |---|---|
 | [`sloptrace`](#sloptrace) | Measures whether a codebase is getting messier, and tracks it over git history. |
+| [`slopmerge`](#slopmerge) | Finds duplicated code, within and across codebases, that could be consolidated. |
 
 ## Install
 
@@ -63,6 +64,32 @@ copies) and trends over history.
 Its erosion number won't exactly match the paper's: the two tools count
 branches slightly differently, so don't compare absolute values with the
 paper's published baselines.
+
+## slopmerge
+
+Finds functions that have been copied, within one codebase or across
+several, and reports each set of copies as a group: where every copy is, and
+what differs between them. It's built to feed a Claude skill that decides
+what to consolidate, but the text summary works on its own too.
+
+```bash
+slopmerge .                                # duplication within one codebase
+slopmerge ../api ../worker ../shared       # ...and between several (all treated as equals)
+slopmerge ../api ../worker --cross-root-only   # only code shared between them
+slopmerge . --json                         # machine-readable output
+slopmerge --help                           # all options
+```
+
+Each group has a tier:
+
+| Tier | Meaning |
+|---|---|
+| **exact** | Identical apart from formatting, comments, docstrings, type annotations and decorators. |
+| **renamed** | Identical apart from local names and literal values. The literals and outside names that differ are listed: they're what a merged function would take as arguments. |
+
+Matching of copies that have drifted (statements added, removed or changed),
+duplicated blocks inside functions, classes and constant tables is planned;
+see the [spec](docs/slopmerge-spec.md).
 
 ## Development
 

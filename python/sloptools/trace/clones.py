@@ -10,36 +10,10 @@ import ast
 import hashlib
 from collections import defaultdict
 
+from sloptools.common.normalise import Normaliser
 from sloptools.trace.config import Config
 
 Span = tuple[str, int, int]   # (file, first line, last line)
-
-
-class _Normaliser(ast.NodeTransformer):
-    """Erase local identifiers and literals so renamed copy-paste still
-    matches -- but keep attribute names, and the name of a directly-called
-    function, intact. Erasing those too made unrelated statements collide
-    on shape alone (`results.append(x)` and `results.update(x)` both
-    became `V.A(V)`); preserving them means a match now requires the same
-    *operation*, not just the same syntactic silhouette.
-    """
-
-    def visit_Call(self, n: ast.Call) -> ast.Call:
-        if not isinstance(n.func, ast.Name):
-            n.func = self.visit(n.func)
-        n.args = [self.visit(a) for a in n.args]
-        n.keywords = [self.visit(k) for k in n.keywords]
-        return n
-
-    def visit_Name(self, n):
-        return ast.copy_location(ast.Name(id="V", ctx=n.ctx), n)
-
-    def visit_arg(self, n):
-        n.arg, n.annotation = "V", None
-        return n
-
-    def visit_Constant(self, n):
-        return ast.copy_location(ast.Constant(value="C"), n)
 
 
 def body_fingerprint(node, min_statements: int) -> str | None:
@@ -50,7 +24,7 @@ def body_fingerprint(node, min_statements: int) -> str | None:
         return None
     try:
         mod = ast.parse(ast.unparse(ast.Module(body=body, type_ignores=[])))
-        norm = _Normaliser().visit(mod)
+        norm = Normaliser().visit(mod)
         return hashlib.md5(ast.dump(norm).encode()).hexdigest()[:16]
     except (SyntaxError, ValueError, RecursionError, AttributeError):
         return None
@@ -131,7 +105,7 @@ def block_clone_windows(tree: ast.AST, rel: str, window: int) -> dict[str, list[
     def norm_stmt(st: ast.stmt) -> str | None:
         try:
             mod = ast.parse(ast.unparse(st))
-            return ast.dump(_Normaliser().visit(mod))
+            return ast.dump(Normaliser().visit(mod))
         except (SyntaxError, ValueError, RecursionError, AttributeError):
             return None
 

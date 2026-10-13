@@ -12,10 +12,12 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sloptools.trace import clones, imports, literals, sloc
+from sloptools.common import sloc
+from sloptools.common.discover import list_python_files
+from sloptools.trace import clones, imports, literals
 from sloptools.trace.complexity import FunctionStat, cognitive_lookup, function_stats, no_cognitive
 from sloptools.trace.config import Config
-from sloptools.trace.discover import ModuleIndex, list_python_files
+from sloptools.trace.discover import ModuleIndex
 
 
 @dataclass

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from radon.complexity import cc_visit
 
-from sloptools.trace.sloc import count_in_span
+from sloptools.common.sloc import count_in_span
 
 try:
     import complexipy   # cognitive complexity (Campbell / SonarSource algorithm)
