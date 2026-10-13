@@ -7,12 +7,13 @@ later milestones.
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sloptools.common.discover import list_python_files
 from sloptools.common.sloc import code_lines, count_in_span
-from sloptools.merge import levels
+from sloptools.merge import boilerplate, levels
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,7 @@ class Function:
     n1: str
     node: ast.FunctionDef | ast.AsyncFunctionDef
     seq: list[levels.Elem]
+    boilerplate: str | None = None   # why it's not a unit (see boilerplate.reason)
 
     @property
     def span(self) -> tuple[str, str, int, int]:
@@ -69,7 +71,8 @@ def functions_in(tree: ast.Module, src: str, root: str, rel: str) -> list[Functi
                     root=root, rel=rel, qualname=f"{prefix}{n.name}", lo=lo, hi=hi,
                     sloc=count_in_span(lines, lo, hi), is_method=in_class,
                     statements=levels.meaningful_statements(n),
-                    n0=levels.n0_hash(n), n1=levels.n1_hash(n), node=n, seq=levels.sequence(n)))
+                    n0=levels.n0_hash(n), n1=levels.n1_hash(n), node=n, seq=levels.sequence(n),
+                    boilerplate=boilerplate.reason(n, in_class)))
                 walk(n.body, f"{prefix}{n.name}.", False)
             else:
                 # defs inside if/try/with blocks at this level
@@ -84,21 +87,34 @@ def functions_in(tree: ast.Module, src: str, root: str, rel: str) -> list[Functi
     return out
 
 
-def collect(roots: list[Root], excludes: tuple[str, ...], include_tests: bool) -> tuple[list[Function], dict[str, int], list[str]]:
-    """Every function under every root, the number of files scanned per root,
-    and warnings for files that couldn't be read or parsed."""
-    functions: list[Function] = []
-    files: dict[str, int] = {}
-    warnings: list[str] = []
+@dataclass
+class Scan:
+    functions: list[Function]                 # the units: boilerplate left out
+    files: dict[str, int]                     # files scanned, per root
+    warnings: list[str] = field(default_factory=list)
+    generated: list[str] = field(default_factory=list)       # "root:file" skipped as generated
+    boilerplate: Counter = field(default_factory=Counter)    # reason -> functions left out
+
+
+def collect(roots: list[Root], excludes: tuple[str, ...], include_tests: bool) -> Scan:
+    """Every function under every root that could be part of a duplicate."""
+    scan = Scan(functions=[], files={})
     for root in roots:
         rels = list_python_files(root.path, excludes, include_tests)
-        files[root.label] = len(rels)
+        scan.files[root.label] = len(rels)
         for rel in rels:
             try:
                 src = (root.path / rel).read_text(encoding="utf-8", errors="replace")
                 tree = ast.parse(src)
             except (OSError, SyntaxError, ValueError, RecursionError) as e:
-                warnings.append(f"{root.label}:{rel}: skipped ({type(e).__name__})")
+                scan.warnings.append(f"{root.label}:{rel}: skipped ({type(e).__name__})")
                 continue
-            functions.extend(functions_in(tree, src, root.label, rel))
-    return functions, files, warnings
+            if boilerplate.generated_file(rel, src, tree):
+                scan.generated.append(f"{root.label}:{rel}")
+                continue
+            for f in functions_in(tree, src, root.label, rel):
+                if f.boilerplate:
+                    scan.boilerplate[f.boilerplate] += 1
+                else:
+                    scan.functions.append(f)
+    return scan

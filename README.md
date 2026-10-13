@@ -90,8 +90,15 @@ Each group has a tier:
 | **renamed** | Identical apart from local names and literal values. The literals and outside names that differ are listed: they're what a merged function would take as arguments. |
 | **near** | The same code with statements added, removed or changed, scored 0–1 against the group's most typical copy. Statements found all over the codebase count for little, so shared boilerplate alone doesn't make a match. The runs of statements that differ are located for each copy. |
 
-Filtering of common boilerplate, duplicated blocks inside functions, classes
-and constant tables are planned; see the [spec](docs/slopmerge-spec.md).
+Code that's duplicated on purpose or by a tool isn't reported: abstract
+methods and stubs, one-line delegations, property accessors, `__init__`
+methods that only store their arguments, attribute-list `__eq__`/`__repr__`/
+`__hash__`, and generated files (protobuf, migrations, files headed "do not
+edit"). Neither are functions made only of statements found all over the
+codebase. What was left out is counted in the JSON output.
+
+Duplicated blocks inside functions, classes and constant tables are planned;
+see the [spec](docs/slopmerge-spec.md).
 
 ## Development
 

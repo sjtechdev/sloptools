@@ -94,6 +94,19 @@ def _components(nodes: list[int], edges: dict[tuple[int, int], float]) -> list[l
     return list(by_root.values())
 
 
+COMMON_MIN_SHAPES = 20      # a statement in more shapes than this (or 2% of them) is common
+COMMON_FRACTION = 0.02
+
+
+def _distinctive(shapes: list[list[Function]]) -> list[list[Function]]:
+    """Shapes with at least one statement that isn't common. A function made
+    only of statements found all over the codebase (`x = None`, `return x`,
+    `for x in y`) has nothing to recognise it by, however long it is."""
+    df = Counter(k for ms in shapes for k in {e.key for e in ms[0].seq[1:] if e.node is not None})
+    cap = max(COMMON_MIN_SHAPES, COMMON_FRACTION * len(shapes))
+    return [ms for ms in shapes if any(e.node is not None and df[e.key] <= cap for e in ms[0].seq[1:])]
+
+
 def find_groups(functions: list[Function], root_order: dict[str, int], min_statements: int,
                 min_similarity: float) -> tuple[list[Group], int]:
     """Duplicate groups, ordered by tier, then savings, then location; and
@@ -106,6 +119,7 @@ def find_groups(functions: list[Function], root_order: dict[str, int], min_state
         if f.statements >= min_statements:
             by_n1[f.n1].append(f)
     shapes = sorted((sorted(ms, key=where) for ms in by_n1.values()), key=lambda ms: where(ms[0]))
+    shapes = _distinctive(shapes)
     keys = [[e.key for e in ms[0].seq] for ms in shapes]
     w = index.idf_weights(keys)
 

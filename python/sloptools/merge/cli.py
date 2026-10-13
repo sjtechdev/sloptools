@@ -60,16 +60,16 @@ def main(argv: list[str] | None = None) -> int:
 
     excludes = tuple(args.exclude) if args.exclude is not None else DEFAULT_EXCLUDES
     roots = label_roots(paths)
-    functions, files, warnings = collect(roots, excludes, args.include_tests)
+    scan = collect(roots, excludes, args.include_tests)
     order = {r.label: i for i, r in enumerate(roots)}
-    groups, subsumed = find_groups(functions, order, args.min_statements, args.min_similarity)
+    groups, subsumed = find_groups(scan.functions, order, args.min_statements, args.min_similarity)
     if args.cross_root_only:
         groups = [g for g in groups if len(g.roots) > 1]
 
     settings = {"min_similarity": args.min_similarity, "min_statements": args.min_statements, "units": ["functions"],
                 "cross_root_only": args.cross_root_only, "include_tests": args.include_tests,
                 "excludes": list(excludes)}
-    result = to_json(roots, files, functions, groups, subsumed, warnings, settings, args.max_group_size)
+    result = to_json(roots, scan, groups, subsumed, settings, args.max_group_size)
     text = json.dumps(result, indent=2)
     if args.output:
         args.output.write_text(text + "\n")
