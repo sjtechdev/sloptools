@@ -9,11 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-DEFAULT_EXCLUDES = (
-    "test", "tests", "testing", "conftest.py", "migrations", "vendor",
-    "vendored", "third_party", "_vendor", "node_modules", "build", "dist",
-    ".venv", "venv", "site-packages", "docs", "examples", "setup.py",
-)
+from sloptools.common.discover import DEFAULT_EXCLUDES
 
 
 @dataclass(frozen=True)

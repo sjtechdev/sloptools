@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sloptools"
 dynamic = ["version"]
-description = "Deterministic code-quality tools for Python codebases: sloptrace (complexity erosion over git history)."
+description = "Deterministic code-quality tools for Python codebases: sloptrace (complexity erosion over git history) and slopmerge (duplicated code to consolidate)."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -29,6 +29,7 @@ test = ["pytest"]
 
 [project.scripts]
 sloptrace = "sloptools.trace.cli:main"
+slopmerge = "sloptools.merge.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/sjtechdev/sloptools"

@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-from sloptools.trace.sloc import code_lines
+from sloptools.common.sloc import code_lines
 
 
 def test_sloc_skips_blanks_comments_and_docstrings():
