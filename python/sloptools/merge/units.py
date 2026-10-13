@@ -1,6 +1,7 @@
 """Roots, and the units of code inside them that can be duplicated.
 
-Milestone 1 handles functions and methods only.
+Functions and methods for now; blocks, classes and constant tables come in
+later milestones.
 """
 
 from __future__ import annotations
@@ -32,7 +33,8 @@ class Function:
     statements: int     # meaningful statements, see levels.meaningful_statements
     n0: str
     n1: str
-    prepared: ast.AST
+    node: ast.FunctionDef | ast.AsyncFunctionDef
+    seq: list[levels.Elem]
 
     @property
     def span(self) -> tuple[str, str, int, int]:
@@ -63,12 +65,11 @@ def functions_in(tree: ast.Module, src: str, root: str, rel: str) -> list[Functi
             elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 lo = min([n.lineno] + [d.lineno for d in n.decorator_list])
                 hi = n.end_lineno or n.lineno
-                prepared = levels.prepare(n)
                 out.append(Function(
                     root=root, rel=rel, qualname=f"{prefix}{n.name}", lo=lo, hi=hi,
                     sloc=count_in_span(lines, lo, hi), is_method=in_class,
-                    statements=levels.meaningful_statements(prepared),
-                    n0=levels.n0_hash(prepared), n1=levels.n1_hash(prepared), prepared=prepared))
+                    statements=levels.meaningful_statements(n),
+                    n0=levels.n0_hash(n), n1=levels.n1_hash(n), node=n, seq=levels.sequence(n)))
                 walk(n.body, f"{prefix}{n.name}.", False)
             else:
                 # defs inside if/try/with blocks at this level

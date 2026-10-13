@@ -127,7 +127,9 @@ at three levels of strictness.
 A normalised statement includes only its own header. An `if` contributes
 its test, not its body; the body's statements come after it in the
 sequence, in pre-order. This keeps sequences comparable when code has been
-re-nested.
+re-nested. The sequence starts with the function's signature, and markers
+(`<else>`, `<elif>`, `<finally>`) show where those branches begin. `pass`,
+`...` and bare `return` are left out.
 
 ## Tiers
 
@@ -158,15 +160,20 @@ sim(a, b) = 2 · W(LCS(a, b)) / (W(a) + W(b))
   matters, unlike sloptrace's old Jaccard over statement sets, so code
   doing the same operations in a different order scores lower.
 - `W(s)` is the summed **IDF weight** of the statements in `s`, where
-  `idf(stmt) = log(N / df(stmt))`, `N` is the number of functions across
-  all roots, and `df` is how many of them contain that normalised statement.
-  A `self.x = x` line that appears in 400 `__init__`s carries almost no
-  weight, while a statement that appears in 3 functions carries a lot.
+  `idf(stmt) = ln((1 + N) / (1 + df(stmt))) + 1`, `N` is the number of
+  distinct N1 forms (shapes) across all roots, and `df` is how many of them
+  contain that normalised statement. A `self.x = x` line that appears in 400
+  `__init__`s weighs about 1, while a statement that appears in 3 functions
+  weighs several times that. The IDF is smoothed because plain
+  `log(N / df)` gives a statement shared by every unit a weight of 0, which
+  breaks small inputs: with two functions, everything they share is
+  "everywhere". Counting shapes rather than functions stops a function
+  copied ten times from discounting its own statements.
 
 The N2 (`related`) score is the IDF-weighted Jaccard of the two token bags.
 
-A group's `similarity` is reported as `{min, max}` over the member pairs
-that were scored.
+Each member's `similarity` is its score against the group's medoid, and a
+group's `similarity` is the `{min, max}` of those, leaving out the medoid.
 
 ## What "meaningful" means
 
@@ -204,27 +211,44 @@ applied before scoring, and each has a test fixture.
 
 ## Grouping
 
-`exact` and `renamed` groups are hash buckets.
+Functions with equal N1 forms form a **shape**. They are certain copies of
+each other, so shapes, not functions, are what gets scored. A shape with
+two or more functions, and no near neighbours, is an `exact` or `renamed`
+group (a hash bucket).
 
-For `near` and `related`, pairs scoring above the threshold form a graph,
-and groups are its connected components, with one safeguard against
-chaining (A~B and B~C, but A and C unrelated): within a component, every
-member must reach the group's **medoid** (the member with the highest total
-similarity to the others) at ≥ `--min-similarity`. Members that don't are
-split off and grouped again. The medoid is reported, because it is the
-natural "keep this one" candidate for the skill.
+For `near`, shape pairs scoring at or above the threshold form a graph, and
+groups are its connected components. A near group takes in every function
+of its shapes, so exact or renamed copies inside it are not reported again
+as their own group. Members carry `shape` and `variant` numbers to show
+which of them are renamed or verbatim copies of each other. Two safeguards
+apply:
+
+- **Chaining** (A~B and B~C, but A and C unrelated): within a component,
+  every shape must score at or above the threshold against the group's
+  **medoid**, the shape with the highest total similarity to the other
+  functions. Shapes that don't are split off and grouped again. The medoid
+  is reported (the first copy of its most common variant), because it is
+  the natural "keep this one" candidate for the skill.
+- **Nesting**: a function and a function nested inside it share statements
+  by construction, but they aren't copies of each other. They are never
+  scored against each other, and never end up in the same group: shapes
+  join the medoid's group closest first, skipping any that nest with a
+  member already in it.
 
 ## Evidence per group
 
 Beyond locations, each group carries what the skill needs to judge it
 without first re-deriving the facts from the source:
 
-- **`differences`** (`near`, `renamed`): from the LCS alignment against the
-  medoid, the statements in each member that are added, removed or changed,
-  with line numbers. This tells the skill what would need to become a
-  parameter or a branch.
-- **`parameters`** (`renamed`, `near`): positions where the members differ
-  only in a literal or a name, with the value and line in each member, e.g.
+- **`differences`** (`near`): from each member's LCS alignment onto the
+  medoid, the runs of statements between matched ones: `added` (only in the
+  member, with its `lines`), `removed` (only in the medoid, with
+  `medoid_lines`), or `changed` (both, in the same place). This tells the
+  skill what would need to become a parameter or a branch.
+- **`parameters`** (`renamed`, `near`): positions in matched statements
+  where the members differ only in a literal or a name, with the value and
+  line in each member (members whose copy of that statement is missing are
+  left out of the entry), e.g.
   `{"kind": "literal", "values": {"m1": "users", "m2": "orders"}, ...}`.
   The same difference repeated is reported once, with a `count`. `kind` is
   one of:
@@ -235,8 +259,10 @@ without first re-deriving the facts from the source:
     also an argument, or a dependency to inject.
   - `rename`: a name every member binds itself (a parameter, a local)
     differs. This is cosmetic, and no argument is needed.
-- **`variant`** per member: members with the same N0 form share a variant
-  number, so a `renamed` group shows which copies are verbatim.
+- **`variant`** and **`shape`** per member: members with the same N0 form
+  share a variant number, and members with the same N1 form share a shape
+  number, so a group shows which copies are verbatim and which are renamed
+  copies of each other.
 - **`uses`** per member: the module globals, imported names and `self`
   attributes it reads, and whether it is a method. This lets the skill judge
   whether a member could move somewhere shared, and what it would drag along.
@@ -267,15 +293,15 @@ without first re-deriving the facts from the source:
       "member_count": 2,
       "members": [
         {"id": "m1", "root": "api", "file": "db.py", "qualname": "fetch_rows",
-         "lines": [12, 40], "sloc": 27, "is_method": false, "variant": 1,
+         "lines": [12, 40], "sloc": 27, "is_method": false, "variant": 1, "shape": 1, "similarity": 1.0,
          "uses": {"imports": ["sqlalchemy.text"], "globals": ["ENGINE"], "self_attrs": []}},
         {"id": "m2", "root": "worker", "file": "store.py", "qualname": "Store.load",
-         "lines": [88, 119], "sloc": 30, "is_method": true, "variant": 2,
+         "lines": [88, 119], "sloc": 30, "is_method": true, "variant": 2, "shape": 2, "similarity": 0.81,
          "uses": {"imports": ["sqlalchemy.text"], "globals": [], "self_attrs": ["engine"]}}
       ],
-      "pairs": [{"a": "m1", "b": "m2", "similarity": 0.81}],
       "parameters": [{"kind": "literal", "values": {"m1": "users", "m2": "jobs"}, "lines": {"m1": 15, "m2": 92}, "count": 1}],
-      "differences": [{"member": "m2", "change": "added", "lines": [101, 104]}],
+      "differences": [{"member": "m2", "change": "added", "lines": [101, 104]},
+                      {"member": "m2", "change": "changed", "lines": [110, 110], "medoid_lines": [30, 31]}],
       "children": []
     }
   ],
@@ -286,7 +312,6 @@ without first re-deriving the facts from the source:
 
 - `file` is relative to its root. `lines` are inclusive and 1-based.
 - `children` holds subsumed matches: a class group's method matches.
-- `pairs` is omitted for `exact` and `renamed` (every pair is 1.0).
 - A group with more than `--max-group-size` members lists only that many,
   with `"truncated": true`. `member_count` is always the full count.
 - `stats.subsumed` counts groups dropped by the subsumption rule.
@@ -305,13 +330,17 @@ It is not a stable interface.
 
 - **Target**: 200k SLOC across all roots in under 30 seconds on a laptop,
   single process. Files are parsed in parallel, using one process per CPU.
-- **Candidate generation**: scoring every pair is quadratic, so `near` and
-  `related` candidates come from an inverted index. Each unit is indexed
-  under its *rarest* k normalised statements (or tokens, for N2), and only
-  units sharing at least one index key are scored. Statements whose `df` is
-  above a cap aren't used as keys; this is the same trick as sloptrace's
-  old `_MAX_DOC_FREQ`. A cheap upper bound on `sim` from the two weights
-  rules out most pairs before the LCS is computed.
+- **Candidate generation**: scoring every pair is quadratic, so `near`
+  candidates come from an inverted index built by **prefix filtering**,
+  which provably misses no pair at or above the threshold. If
+  `sim(a, b) ≥ t`, the weight `a` and `b` share is at least
+  `t · W(a) / (2 − t)`, because it can't exceed `W(b)`. Ordering every
+  statement occurrence rarest first, `a`'s shortest prefix whose remaining
+  weight is below that bound must share an occurrence with `b`'s prefix.
+  Units are indexed under their prefix only, and only units sharing a key
+  are considered. Two cheap bounds, on relative size and on bag-of-statement
+  overlap, then rule out most of those before an LCS is computed. A
+  randomised test checks the no-miss property against brute force.
 - LCS is computed on statement sequences, not tokens, so sequences are
   short (tens of entries), and quadratic LCS per pair is fine.
 
