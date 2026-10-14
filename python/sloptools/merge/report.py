@@ -6,7 +6,7 @@ from collections import Counter
 from typing import TextIO
 
 from sloptools import __version__
-from sloptools.merge import constants, evidence
+from sloptools.merge import classes, constants, evidence
 from sloptools.merge.match import TIERS, Group
 from sloptools.merge.units import Unit, Root, Scan
 
@@ -20,20 +20,26 @@ def _member(f: Unit, mid: str, variant: int, shape: int, similarity: float) -> d
            "variant": variant, "shape": shape, "similarity": similarity}
     if f.kind == "constant":
         out["entries"] = len(constants.elements(f.nodes[0]))
+    if f.kind == "class":
+        out["fields"] = list(f.fields)
     return out
 
 
 def _parameters(g: Group, shown: list[Unit], ids: list[str], medoid: int, alignment) -> list[dict]:
     if g.tier == "exact":
         return []
+    if g.unit == "class":
+        return classes.parameters(shown, ids)
     if g.unit == "constant":
         return constants.parameters(shown, ids) if g.tier == "renamed" else []
     return evidence.parameters(shown, ids, medoid, alignment)
 
 
-def _differences(g: Group, shown: list[Unit], ids: list[str], medoid: int, alignment) -> list[dict]:
+def _differences(g: Group, shown: list[Unit], ids: list[str], medoid: int, alignment, picked) -> list[dict]:
     if g.tier != "near":
         return []
+    if g.unit == "class":
+        return classes.differences(ids, medoid, [g.profiles[i] for i in picked], [g.method_names[i] for i in picked])
     if g.unit == "constant":
         return constants.differences(shown, ids, medoid)
     return evidence.differences(shown, ids, medoid, alignment)
@@ -62,8 +68,8 @@ def _group(g: Group, gid: str, max_size: int) -> dict:
         "members": [_member(g.members[p], i, g.variants[p], g.shapes[p], g.similarity[p])
                     for p, i in zip(picked, ids)],
         "parameters": _parameters(g, shown, ids, medoid, alignment),
-        "differences": _differences(g, shown, ids, medoid, alignment),
-        "children": [],
+        "differences": _differences(g, shown, ids, medoid, alignment, picked),
+        "children": [_group(c, f"{gid}.{j}", max_size) for j, c in enumerate(g.children, 1)],
     }
     if len(shown) < len(g.members):
         out["truncated"] = True
@@ -82,7 +88,7 @@ def to_json(roots: list[Root], scan: Scan, groups: list[Group], subsumed: int, s
         "stats": {
             "files": sum(scan.files.values()),
             "units": {"function": len(scan.functions), "statement_lists": len(scan.bodies),
-                      "constant": len(scan.constants)},
+                      "constant": len(scan.constants), "class": len(scan.classes)},
             "groups_by_tier": {t: by_tier.get(t, 0) for t in TIERS},
             "subsumed": subsumed,
             "skipped": {"generated_files": scan.generated,
@@ -102,7 +108,7 @@ def print_text(result: dict, out: TextIO) -> None:
     groups = result["groups"]
     w(f"\nslopmerge  {len(result['roots'])} root(s), {stats['files']} files, "
       f"{stats['units']['function']} functions, {stats['units']['statement_lists']} statement lists, "
-      f"{stats['units']['constant']} constant tables\n")
+      f"{stats['units']['constant']} constant tables, {stats['units']['class']} classes\n")
     counts = ", ".join(f"{n} {t}" for t, n in stats["groups_by_tier"].items())
     w(f"           {len(groups)} duplicate group(s): {counts}; "
       f"~{sum(g['savings'] for g in groups)} lines removable\n")
@@ -125,8 +131,12 @@ def print_text(result: dict, out: TextIO) -> None:
             w(f"    differs ({p['kind']}): {vals}\n")
         if len(params) > 3:
             w(f"    ... {len(params) - 3} more differing value(s)\n")
+        if g["children"]:
+            w(f"    {len(g['children'])} method group(s) inside; see 'children' in --json\n")
         if g["differences"]:
-            if g["unit"] == "constant":
+            if g["unit"] == "class":
+                w(f"    fields or methods differ between copies; see --json\n")
+            elif g["unit"] == "constant":
                 n = sum(len(d["values"]) for d in g["differences"])
                 w(f"    {n} entr(y/ies) added or removed between copies; see --json\n")
             else:

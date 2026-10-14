@@ -2,7 +2,7 @@
 
 A unit is a function (or method); a block, a run of statements inside any
 body, found from `Body` records, one per statement list in a file (see
-blocks.py); or a constant table (see constants.py). Classes come later.
+blocks.py); a constant table (see constants.py); or a class (classes.py).
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from pathlib import Path
 from sloptools.common.discover import list_python_files
 from sloptools.common.sloc import code_lines, count_in_span
 from sloptools.merge import boilerplate, levels
+from sloptools.merge.classes import fields_of
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,7 @@ class Root:
 
 @dataclass
 class Unit:
-    kind: str           # "function" or "block"
+    kind: str           # "function", "block", "constant" or "class"
     root: str
     rel: str            # relative to its root
     qualname: str       # Class.method, outer.inner; for a block, where it is ("<module>" at top level)
@@ -39,6 +40,7 @@ class Unit:
     nodes: list         # [the function], or the block's statements
     seq: list[levels.Elem]
     boilerplate: str | None = None   # why it's not a unit (see boilerplate.reason)
+    fields: dict | None = None       # a class's fields: name -> type or None (see classes.fields_of)
 
     @property
     def span(self) -> tuple[str, str, int, int]:
@@ -114,11 +116,13 @@ def _segments(stmts: list) -> list[list]:
     return out
 
 
-def units_in(tree: ast.Module, lines: tuple[int, ...], root: str, rel: str) -> tuple[list[Unit], list[Body]]:
-    """Every function in a file, and every statement list in it. `lines`
-    are the file's code lines (common.sloc.code_lines)."""
+def units_in(tree: ast.Module, lines: tuple[int, ...], root: str,
+             rel: str) -> tuple[list[Unit], list[Body], list[Unit]]:
+    """Every function, statement list and class in a file. `lines` are the
+    file's code lines (common.sloc.code_lines)."""
     functions: list[Unit] = []
     bodies: list[Body] = []
+    classes: list[Unit] = []
 
     def body(stmts: list, where: str, is_method: bool, in_function: bool = True) -> None:
         for seg in _segments(stmts):
@@ -131,6 +135,11 @@ def units_in(tree: ast.Module, lines: tuple[int, ...], root: str, rel: str) -> t
         `inside` is whether that scope is a function."""
         for n in nodes:
             if isinstance(n, ast.ClassDef):
+                lo = min([n.lineno] + [d.lineno for d in n.decorator_list])
+                hi = n.end_lineno or n.lineno
+                classes.append(Unit(kind="class", root=root, rel=rel, qualname=f"{prefix}{n.name}", lo=lo, hi=hi,
+                                    sloc=count_in_span(lines, lo, hi), is_method=False, statements=0,
+                                    n0="", n1="", nodes=[n], seq=[], fields=fields_of(n)))
                 body(n.body, f"{prefix}{n.name}", False, in_function=False)
                 walk(n.body, f"{prefix}{n.name}.", True, f"{prefix}{n.name}", False, False)
             elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -157,7 +166,7 @@ def units_in(tree: ast.Module, lines: tuple[int, ...], root: str, rel: str) -> t
 
     body(tree.body, "<module>", False, in_function=False)
     walk(tree.body, "", False, "<module>", False)
-    return functions, bodies
+    return functions, bodies, classes
 
 
 @dataclass
@@ -165,6 +174,7 @@ class Scan:
     functions: list[Unit]                     # function units: boilerplate left out
     bodies: list[Body]                        # statement lists, for blocks
     constants: list[Unit]                     # literal tables
+    classes: list[Unit]
     files: dict[str, int]                     # files scanned, per root
     warnings: list[str] = field(default_factory=list)
     generated: list[str] = field(default_factory=list)       # "root:file" skipped as generated
@@ -176,7 +186,7 @@ def collect(roots: list[Root], excludes: tuple[str, ...], include_tests: bool) -
     part of a duplicate."""
     from sloptools.merge.constants import constants_in   # it builds on Unit, defined here
 
-    scan = Scan(functions=[], bodies=[], constants=[], files={})
+    scan = Scan(functions=[], bodies=[], constants=[], classes=[], files={})
     for root in roots:
         rels = list_python_files(root.path, excludes, include_tests)
         scan.files[root.label] = len(rels)
@@ -191,8 +201,9 @@ def collect(roots: list[Root], excludes: tuple[str, ...], include_tests: bool) -
                 scan.generated.append(f"{root.label}:{rel}")
                 continue
             lines = code_lines(src, tree)
-            functions, bodies = units_in(tree, lines, root.label, rel)
+            functions, bodies, classes = units_in(tree, lines, root.label, rel)
             scan.bodies.extend(bodies)
+            scan.classes.extend(classes)
             scan.constants.extend(constants_in(tree, root.label, rel, lines))
             for f in functions:
                 if f.boilerplate:

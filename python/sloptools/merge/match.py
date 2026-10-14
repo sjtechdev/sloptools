@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from sloptools.merge import blocks, constants, index, levels
+from sloptools.merge import blocks, classes, constants, index, levels
 from sloptools.merge.units import Scan, Unit
 
 TIERS = ("exact", "renamed", "near")
@@ -28,13 +28,17 @@ TIERS = ("exact", "renamed", "near")
 @dataclass
 class Group:
     tier: str
-    members: list[Unit]     # sorted by location; all of one kind (function, block, constant)
+    members: list[Unit]     # sorted by location; all of one kind (function, block, constant, class)
     variants: list[int]         # per member: 1-based index of its N0 form
     shapes: list[int]           # per member: 1-based index of its N1 form
     medoid: int                 # index into members
     similarity: list[float]     # per member, to the medoid
     # per member: matched (member element, medoid element) index pairs
     alignment: list[list[tuple[int, int]]] = field(repr=False)
+    children: list["Group"] = field(default_factory=list)   # method groups inside a class group
+    # class groups only, per member: its profile, and its method tokens -> method names
+    profiles: list[list[str]] | None = field(default=None, repr=False)
+    method_names: list[dict[str, list[str]]] | None = field(default=None, repr=False)
 
     @property
     def unit(self) -> str:
@@ -116,7 +120,7 @@ def _distinctive_test(shapes: list[list[Unit]]):
 
 
 def find_groups(scan: Scan, root_order: dict[str, int], min_statements: int, min_similarity: float,
-                units: tuple[str, ...] = ("functions", "blocks", "constants")) -> tuple[list[Group], int]:
+                units: tuple[str, ...] = ("functions", "blocks", "constants", "classes")) -> tuple[list[Group], int]:
     """Duplicate groups, biggest estimated savings first, then by tier and
     location; and the number of groups dropped as subsumed."""
     def where(f: Unit):
@@ -147,9 +151,13 @@ def find_groups(scan: Scan, root_order: dict[str, int], min_statements: int, min
         construction; they aren't copies of each other."""
         return any(_contains(x, y) or _contains(y, x) for x in shapes[a] for y in shapes[b])
 
-    groups: list[Group] = []
-    if "functions" in units:
-        groups += _cluster(shapes, keys, w, min_similarity, score, nested, where)
+    function_groups = _cluster(shapes, keys, w, min_similarity, score, nested, where)
+    groups: list[Group] = list(function_groups) if "functions" in units else []
+    if "classes" in units:
+        eligible = [f for ms in shapes for f in ms]
+        class_groups = _class_groups(scan.classes, eligible, function_groups, min_similarity, where)
+        groups += class_groups
+        groups = _nest_method_groups(groups, class_groups)
     if "blocks" in units:
         groups.extend(_block_group(copies, where) for copies in blocks.find(scan.bodies, min_statements, distinctive))
     if "constants" in units:
@@ -256,3 +264,66 @@ def _constant_groups(units: list[Unit], threshold: float, where) -> list[Group]:
         return cache[(a, b)], []
 
     return _cluster(shapes, keys, w, threshold, score, lambda a, b: False, where)
+
+
+def _owner(m: Unit) -> tuple[str, str, str] | None:
+    """The class a method belongs to, as (root, file, class qualname)."""
+    return (m.root, m.rel, m.qualname.rsplit(".", 1)[0]) if m.kind == "function" and m.is_method else None
+
+
+def _class_groups(class_units: list[Unit], methods: list[Unit], function_groups: list[Group],
+                  threshold: float, where) -> list[Group]:
+    """Classes grouped by their profiles: fields and matching methods."""
+    group_of = {id(m): gi for gi, g in enumerate(function_groups) for m in g.members}
+    by_class: dict[tuple, list[Unit]] = defaultdict(list)
+    for m in methods:
+        if (o := _owner(m)) is not None:
+            by_class[o].append(m)
+    profiles: dict[int, list[str]] = {}
+    names: dict[int, dict[str, list[str]]] = {}
+    for c in class_units:
+        ms = sorted(by_class.get((c.root, c.rel, c.qualname), []), key=where)
+        tokens = classes.set_forms(c, ms, group_of)
+        if classes.enough(tokens):
+            profiles[id(c)] = tokens
+            names[id(c)] = defaultdict(list)
+            for m in ms:
+                names[id(c)][classes.method_token(m, group_of)].append(m.qualname.rsplit(".", 1)[1])
+
+    by_n1: dict[str, list[Unit]] = defaultdict(list)
+    for c in class_units:
+        if id(c) in profiles:
+            by_n1[c.n1].append(c)
+    shapes = sorted((sorted(cs, key=where) for cs in by_n1.values()), key=lambda cs: where(cs[0]))
+    keys = [profiles[id(cs[0])] for cs in shapes]
+    w = index.idf_weights(keys)
+    cache: dict[tuple[int, int], float] = {}
+
+    def score(a: int, b: int) -> tuple[float, list]:
+        if (a, b) not in cache:
+            cache[(a, b)] = classes.score(keys[a], keys[b], w)
+        return cache[(a, b)], []
+
+    def nested(a: int, b: int) -> bool:
+        return any(_contains(x, y) or _contains(y, x) for x in shapes[a] for y in shapes[b])
+
+    out = _cluster(shapes, keys, w, threshold, score, nested, where)
+    for g in out:
+        g.profiles = [profiles[id(c)] for c in g.members]
+        g.method_names = [dict(names[id(c)]) for c in g.members]
+    return out
+
+
+def _nest_method_groups(groups: list[Group], class_groups: list[Group]) -> list[Group]:
+    """A function group made only of methods of one class group's members
+    is listed inside it, as a child, instead of on its own."""
+    members_of = [{(c.root, c.rel, c.qualname) for c in cg.members} for cg in class_groups]
+    out = []
+    for g in groups:
+        owners = {_owner(m) for m in g.members} if g.unit == "function" else {None}
+        home = next((cg for cg, ms in zip(class_groups, members_of) if None not in owners and owners <= ms), None)
+        if home is None:
+            out.append(g)
+        else:
+            home.children.append(g)
+    return out

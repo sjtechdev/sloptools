@@ -88,7 +88,7 @@ One root works too. Each root is labelled by its directory name, with
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--units` | `functions,blocks,constants` | Which unit types to match (`classes` to come). |
+| `--units` | `functions,blocks,constants,classes` | Which unit types to match. |
 | `--min-similarity` | `0.6` | Lowest similarity reported for the `near` and `related` tiers. |
 | `--no-related` | off | Skip the `related` (vocabulary-based) tier. |
 | `--min-statements` | `3` | Smallest function or block considered, after boilerplate is removed. |
@@ -110,7 +110,7 @@ exists, and a normalised representation at each level (see below).
 |---|---|---|
 | **function** | Every `def` and `async def`, including methods and nested functions. | The main consolidation unit. The docstring is dropped before comparing. |
 | **block** | A run of consecutive statements inside any body (module, class, function or nested), holding at least `--min-statements` meaningful statements; one big duplicated loop counts. | Catches duplicated logic inside otherwise different functions ("extract a helper"). See [Blocks](#blocks). |
-| **class** | A `class` definition, compared on its methods and its declared fields. | Two kinds of match. *Behavioural*: most of the methods match pairwise. *Data shape*: the same set of fields, e.g. two dataclasses, Pydantic models or TypedDicts with the same field names (and types, where annotated). |
+| **class** | A `class` definition, compared on its methods and its declared fields. | Two kinds of match, scored together. *Behavioural*: most of the methods match pairwise. *Data shape*: the same set of fields, e.g. two dataclasses, Pydantic models or TypedDicts with the same field names (and types, where annotated). See [Classes](#classes). |
 | **constant** | A literal list, tuple, set or dict made only of constants (strings, numbers, booleans, `None`) and nested literals, with at least 3 distinct entries. Only the outermost literal counts. | Column lists, choice tables, config maps. See [Constant tables](#constant-tables). |
 
 ## Blocks
@@ -178,6 +178,36 @@ list and a set with the same entries end up in one near group at
 similarity 1.0, with different `shape`s. Constants inside a function or
 block group are subsumed by it. Constant members carry `entries`, their
 number of entries.
+
+## Classes
+
+A class is reduced to a **profile**: one token per declared field
+(`f:email`) and one per method in a function group (`m:<group>`). A method
+that matches nothing gets a token of its own, so it counts against the
+match. Profiles are scored by IDF-weighted overlap,
+`2 · W(shared) / (W(a) + W(b))`. Two classes must share at least three
+tokens, or two matching methods: each is already a confirmed copy, so it's
+stronger evidence than two common field names. One score covers both kinds
+of class match, so a class matching on fields and methods is reported once.
+
+**Fields** are annotated class attributes (`email: str`, but not
+`ClassVar`s), class attributes assigned a call (`email =
+models.CharField(...)`, as in Django or SQLAlchemy), and `self.<name>`
+assigned in `__init__`. Plain class attributes assigned a literal (`name =
+"MIPS"`) are configuration, not fields: counting them would make every
+pygments lexer match every other. A field's type is its annotation, or the
+field constructor called.
+
+**Tiers:** N1 is the profile, so `exact`/`renamed` classes have the same
+fields and the same matching methods; `exact` also needs identical field
+types and verbatim methods (N0). Differing field types are `parameters`
+(`{"kind": "type", "key": "country", ...}`). For `near` classes,
+`differences` list the `fields` and `methods` each copy adds or lacks.
+
+**Children:** a function group made only of methods of one class group's
+members is listed inside that group, in `children`, rather than on its own
+(rule 4 of [What "meaningful" means](#what-meaningful-means)). Children have
+ids like `g3.1`. Class members carry `fields`, their field names.
 
 ## Normalisation levels
 
@@ -441,15 +471,19 @@ It is not a stable interface.
     snippet copied verbatim into two functions (an exact block); the same
     column list in three modules, as a list and a tuple (an exact constant);
     a column list with one extra column (a near constant); a retry policy
-    dict with the same keys and other values (a renamed constant). Still to
-    add with milestone 4: two dataclasses with the same fields.
+    dict with the same keys and other values (a renamed constant); two
+    record classes with the same `__init__` fields (an exact class); two
+    dataclasses with one field typed differently (a renamed class, the type
+    as a parameter); two repository classes whose methods are renamed copies
+    (a class group with its method groups as children).
   - negatives: property boilerplate; `__init__` assignment lists and
     attribute-list `__eq__` copied between record classes; one-line
     delegations; functions with the same silhouette but all-different
     operations; unrelated functions that both use `logging` heavily; a loop
     and a comprehension computing the same thing (to become a `related`
     match with milestone 5, never `near`); a verbatim copy inside a
-    generated `_pb2` file; two small tuples sharing only two values.
+    generated `_pb2` file; two small tuples sharing only two values; two
+    classes sharing only `id` and `name`.
 
   The test asserts there are no missed `exact`/`renamed` matches and that
   no negative pair is grouped, and measures `near` recall and overall

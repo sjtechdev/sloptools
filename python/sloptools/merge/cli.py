@@ -21,8 +21,8 @@ def build_parser() -> argparse.ArgumentParser:
                          "reported within and between them")
     ap.add_argument("--json", action="store_true", help="print JSON instead of the text summary")
     ap.add_argument("-o", "--output", type=Path, default=None, help="also write JSON here")
-    ap.add_argument("--units", default="functions,blocks,constants", metavar="LIST",
-                    help="what to match, comma-separated: functions, blocks, constants (default all)")
+    ap.add_argument("--units", default="functions,blocks,constants,classes", metavar="LIST",
+                    help="what to match, comma-separated: functions, blocks, constants, classes (default all)")
     ap.add_argument("--min-statements", type=int, default=3, metavar="N",
                     help="smallest function or block considered, in statements (default 3)")
     ap.add_argument("--min-similarity", type=float, default=0.6, metavar="T",
@@ -61,8 +61,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--min-statements must be at least 1 and --max-group-size at least 2")
 
     units = tuple(u.strip() for u in args.units.split(",") if u.strip())
-    if not units or set(units) - {"functions", "blocks", "constants"}:
-        parser.error("--units takes a comma-separated list of: functions, blocks, constants")
+    if not units or set(units) - {"functions", "blocks", "constants", "classes"}:
+        parser.error("--units takes a comma-separated list of: functions, blocks, constants, classes")
 
     excludes = tuple(args.exclude) if args.exclude is not None else DEFAULT_EXCLUDES
     roots = label_roots(paths)
