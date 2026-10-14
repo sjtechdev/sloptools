@@ -79,7 +79,7 @@ slopmerge .                                # duplication within one codebase
 slopmerge ../api ../worker ../shared       # ...and between several (all treated as equals)
 slopmerge ../api ../worker --cross-root-only   # only code shared between them
 slopmerge . --min-similarity 0.8           # only close near-copies (default 0.6)
-slopmerge . --units functions,constants    # leave out blocks
+slopmerge . --units functions,classes      # leave out blocks and constants
 slopmerge . --json                         # machine-readable output
 slopmerge --help                           # all options
 ```
@@ -100,7 +100,10 @@ A group is of one kind of unit:
   differing outside names are the parameters the helper would take;
 - **constants**: the same literal list, tuple, set or dict in several places
   (column lists, choice tables, config maps). Dicts with the same keys and
-  other values are `renamed`; near copies list the entries that differ.
+  other values are `renamed`; near copies list the entries that differ;
+- **classes**: classes declaring the same fields (dataclasses, models,
+  records) or whose methods mostly match (a base class waiting to be
+  extracted). Their matching methods are listed inside the class group.
 
 Code that's duplicated on purpose or by a tool isn't reported: abstract
 methods and stubs, one-line delegations, property accessors, `__init__`
@@ -109,7 +112,7 @@ methods that only store their arguments, attribute-list `__eq__`/`__repr__`/
 edit"). Neither are functions made only of statements found all over the
 codebase. What was left out is counted in the JSON output.
 
-Classes are planned; see the [spec](docs/slopmerge-spec.md).
+See the [spec](docs/slopmerge-spec.md) for exactly how each kind of match works.
 
 ## Development
 

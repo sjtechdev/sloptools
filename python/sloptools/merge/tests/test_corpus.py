@@ -32,6 +32,9 @@ EXPECTED = [
     ("constant", "exact", {"app:REPORT_COLUMNS", "lib:REPORT_COLUMNS", "lib:COLUMNS"}),
     ("constant", "renamed", {"app:RETRY_POLICY", "lib:RETRY_POLICY"}),
     ("constant", "near", {"app:ACCOUNT_COLUMNS", "lib:ACCOUNT_FIELDS"}),
+    ("class", "exact", {"app:Order", "lib:Invoice"}),                  # same fields, from __init__
+    ("class", "renamed", {"app:Address", "lib:PostalAddress"}),        # dataclasses, one type differs
+    ("class", "renamed", {"app:OrderRepository", "lib:InvoiceRepository"}),   # method for method
 ]
 
 # pairs that look alike on the surface but mustn't be grouped
@@ -43,6 +46,7 @@ APART = [
     ("app:active_names_loop", "app:active_names_comprehension"),    # a `related` match, not `near`
     ("app:hash_password", "app:check_password"),
     ("app:OPEN_MODES", "lib:WRITE_MODES"),                           # two shared values isn't a table
+    ("app:Customer", "lib:Tag"),                                     # only id and name in common
 ]
 
 # currently 1.0 each; a floor leaves room for tuning without hiding a regression
@@ -112,3 +116,14 @@ def test_generated_file_and_boilerplate_are_skipped(result):
         "accessor", "attribute-dunder", "delegation", "init-assignments", "stub"}
     names = {k.split("/", 1)[1] for k in _group_of(result)}
     assert not any(n.endswith(("__init__", "__eq__", "__repr__", "__hash__", ".size", ".save")) for n in names)
+
+
+def test_method_groups_are_listed_inside_their_class_group(result):
+    [repos] = [g for g in result["groups"] if g["unit"] == "class" and "OrderRepository" in str(g["members"])]
+    assert [sorted(m["qualname"] for m in c["members"]) for c in repos["children"]] == [
+        ["InvoiceRepository.get", "OrderRepository.get"],
+        ["InvoiceRepository.recent", "OrderRepository.recent"],
+        ["InvoiceRepository.delete", "OrderRepository.delete"],
+    ]
+    top = {_name(m) for g in result["groups"] if g["unit"] == "function" for m in g["members"]}
+    assert not any("Repository." in n for n in top)
