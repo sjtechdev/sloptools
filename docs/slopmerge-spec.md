@@ -237,7 +237,7 @@ one that all of its members satisfy pairwise.
 | `exact` | Identical N0 sequences. | Certain. |
 | `renamed` | Identical N1 sequences. | Certain that the structure is the same. Literal or name differences are listed as parameters. |
 | `near` | Weighted similarity of the N1 sequences ≥ `--min-similarity` (see Scoring). | High at ≥0.85, medium below that. |
-| `related` | N1 similarity is below the threshold, but weighted N2 similarity ≥ `--min-similarity` and sizes are within 2× of each other. | Low: they use the same APIs in a similar amount of code. Candidates for the skill to read and verify. |
+| `related` | A function in no other group, whose weighted N2 similarity to another such function is ≥ `--min-similarity`, sharing at least three tokens, with sizes within 2× of each other. | Low: they use the same APIs in a similar amount of code. Candidates for the skill to read and verify; the group's `vocabulary` lists the tokens all members share. |
 
 `exact` and `renamed` are found by hashing, so nothing can be missed.
 `near` and `related` go through candidate generation and are only as good
@@ -266,7 +266,14 @@ sim(a, b) = 2 · W(LCS(a, b)) / (W(a) + W(b))
   "everywhere". Counting shapes rather than functions stops a function
   copied ten times from discounting its own statements.
 
-The N2 (`related`) score is the IDF-weighted Jaccard of the two token bags.
+The N2 (`related`) score is the IDF-weighted overlap of the two token bags,
+`2 · W(shared) / (W(a) + W(b))`, the same measure as for constants and
+classes, with weights from all functions' vocabularies. A function's N2
+tokens are the names it calls (`call:sorted`, `call:.append`), the
+attributes it uses (`attr:.state`), the imported modules it uses
+(`mod:os.path`), its string literals (`str:active`), and the exceptions it
+raises and catches (`raise:KeyError`, `catch:TimeoutError`); docstrings
+don't count. Only functions that matched nothing structurally are compared.
 
 Each member's `similarity` is its score against the group's medoid, and a
 group's `similarity` is the `{min, max}` of those, leaving out the medoid.
@@ -419,7 +426,8 @@ without first re-deriving the facts from the source:
       "parameters": [{"kind": "literal", "values": {"m1": "users", "m2": "jobs"}, "lines": {"m1": 15, "m2": 92}, "count": 1}],
       "differences": [{"member": "m2", "change": "added", "lines": [101, 104]},
                       {"member": "m2", "change": "changed", "lines": [110, 110], "medoid_lines": [30, 31]}],
-      "children": []
+      "children": [],
+      "vocabulary": ["call:.fetch_one", "str:deleted"]
     }
   ],
   "stats": {"files": 412, "units": {"function": 3120, "statement_lists": 9870, "constant": 95, "class": 240}, "groups_by_tier": {"exact": 4, "renamed": 9, "near": 21, "related": 12}, "subsumed": 7,
@@ -430,12 +438,14 @@ without first re-deriving the facts from the source:
 
 - `file` is relative to its root. `lines` are inclusive and 1-based.
 - `children` holds subsumed matches: a class group's method matches.
+- `vocabulary` is present on `related` groups only.
 - A group with more than `--max-group-size` members lists only that many,
   with `"truncated": true`. `member_count` is always the full count.
 - `stats.subsumed` counts groups dropped by the subsumption rule.
 - Groups are sorted by `savings`, largest first, then by tier (`exact` →
-  `related`), then by first location, so the biggest consolidation wins
-  lead. (An earlier draft sorted by tier first, which put three-line exact
+  `near`), then by first location, so the biggest consolidation wins lead.
+  `related` groups always come last, in the same order among themselves:
+  their savings are speculative. (An earlier draft sorted by tier first, which put three-line exact
   blocks above hundred-line near copies.) The same input always gives the
   same output, byte for byte.
 - Any change to the schema bumps `schema_version`.

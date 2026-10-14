@@ -277,3 +277,45 @@ def load_jobs(db):
     assert literals == [{"m1": "users", "m2": "jobs"}]
     [d] = g["differences"]
     assert d["change"] in ("added", "removed")
+
+
+def test_loop_and_comprehension_are_related_with_their_shared_vocabulary(run):
+    src = '''
+def names_loop(users):
+    names = []
+    for user in users:
+        if user.state == "active":
+            names.append(user.name.title())
+    return sorted(names)
+
+
+def names_comprehension(users):
+    names = [u.name.title() for u in users if u.state == "active"]
+    names.sort()
+    result = list(names)
+    return result
+'''
+    # unrelated neighbours, as any codebase has: with only two functions, everything
+    # they share would look ubiquitous to the IDF weights
+    others = _steps("p", "a b c") + _steps("q", "d e f") + _steps("s", "g h i")
+    [g] = groups(run({"r": {"m.py": src, "other.py": others}}))
+    assert g["tier"] == "related"
+    assert g["vocabulary"] == ["attr:.name", "attr:.state", "call:.title", "str:active"]
+    assert groups(run({"r2": {"m.py": src, "other.py": others}}, "--no-related")) == []
+
+
+def test_related_needs_similar_size(run):
+    # b has a's vocabulary and four times the code (arithmetic adds no vocabulary)
+    body = "    x = u.name.title()\n    y = u.state == 'active'\n    z = u.email.lower()\n"
+    small = f"\ndef a(u):\n{body}    return x, y, z\n"
+    big = f"\ndef b(u, n):\n{body}" + "".join(f"    n = n * {i} + 1\n" for i in range(9)) + "    return x, y, z, n\n"
+    others = _steps("p", "a b c") + _steps("q", "d e f") + _steps("s", "g h i")
+    assert [g for g in groups(run({"r": {"m.py": small + big, "o.py": others}})) if g["tier"] == "related"] == []
+
+
+def test_related_groups_come_after_the_rest(run):
+    loop = "\ndef n1(users):\n    out = []\n    for u in users:\n        if u.state == 'active':\n            out.append(u.name.title())\n    return sorted(out)\n"
+    comp = "\ndef n2(users):\n    out = [u.name.title() for u in users if u.state == 'active']\n    out.sort()\n    final = list(out)\n    return final\n"
+    others = _steps("p", "a b c") + _steps("q", "d e f") + _steps("s", "g h i")
+    out = run({"r": {"m.py": loop + comp + FETCH + FETCH_RESTYLED.replace("import functools", ""), "o.py": others}})
+    assert [g["tier"] for g in groups(out)][-1] == "related"

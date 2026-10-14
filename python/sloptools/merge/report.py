@@ -6,7 +6,7 @@ from collections import Counter
 from typing import TextIO
 
 from sloptools import __version__
-from sloptools.merge import classes, constants, evidence
+from sloptools.merge import classes, constants, evidence, related
 from sloptools.merge.match import TIERS, Group
 from sloptools.merge.units import Unit, Root, Scan
 
@@ -28,7 +28,7 @@ def _member(f: Unit, mid: str, variant: int, shape: int, similarity: float) -> d
 
 
 def _parameters(g: Group, shown: list[Unit], ids: list[str], medoid: int, alignment) -> list[dict]:
-    if g.tier == "exact":
+    if g.tier in ("exact", "related"):
         return []
     if g.unit == "class":
         return classes.parameters(shown, ids)
@@ -73,6 +73,8 @@ def _group(g: Group, gid: str, max_size: int) -> dict:
         "differences": _differences(g, shown, ids, medoid, alignment, picked),
         "children": [_group(c, f"{gid}.{j}", max_size) for j, c in enumerate(g.children, 1)],
     }
+    if g.tier == "related":
+        out["vocabulary"] = related.shared_vocabulary(shown)
     if len(shown) < len(g.members):
         out["truncated"] = True
     return out
@@ -117,12 +119,12 @@ def print_text(result: dict, out: TextIO) -> None:
 
     for g in groups[:TEXT_TOP_N]:
         roots = ", ".join(g["roots"])
-        sim = f"{g['similarity']['min']:.0%}-{g['similarity']['max']:.0%} similar, " if g["tier"] == "near" else ""
+        sim = f"{g['similarity']['min']:.0%}-{g['similarity']['max']:.0%} similar, " if g["tier"] in ("near", "related") else ""
         unit = "" if g["unit"] == "function" else f" {g['unit']}"
         w(f"\n{g['tier'].upper() + unit:<14} {g['member_count']} copies, {sim}~{g['savings']} lines   [{roots}]\n")
         for m in g["members"]:
             mark = "*" if m["id"] == g["medoid"] else " "
-            pct = f"{m['similarity']:>5.0%}" if g["tier"] == "near" else ""
+            pct = f"{m['similarity']:>5.0%}" if g["tier"] in ("near", "related") else ""
             where = m["qualname"] if g["unit"] == "function" else f"in {m['qualname']}"
             w(f"  {mark} {_location(m):<60} {pct} {where}\n")
         if g.get("truncated"):
@@ -133,6 +135,9 @@ def print_text(result: dict, out: TextIO) -> None:
             w(f"    differs ({p['kind']}): {vals}\n")
         if len(params) > 3:
             w(f"    ... {len(params) - 3} more differing value(s)\n")
+        if g.get("vocabulary"):
+            vocab = ", ".join(g["vocabulary"][:8])
+            w(f"    shared vocabulary: {vocab}{' ...' if len(g['vocabulary']) > 8 else ''}\n")
         if g["children"]:
             w(f"    {len(g['children'])} method group(s) inside; see 'children' in --json\n")
         if g["differences"]:

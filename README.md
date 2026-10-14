@@ -91,6 +91,7 @@ Each group has a tier:
 | **exact** | Identical apart from formatting, comments, docstrings, type annotations and decorators. |
 | **renamed** | Identical apart from local names and literal values. The literals and outside names that differ are listed: they're what a merged function would take as arguments. |
 | **near** | The same code with statements added, removed or changed, scored 0–1 against the group's most typical copy. Statements found all over the codebase count for little, so shared boilerplate alone doesn't make a match. The runs of statements that differ are located for each copy. |
+| **related** | Written differently, but using the same calls, attributes, literals and exceptions in a similar amount of code: a loop and a comprehension computing the same thing, say. Low confidence, listed last, with the shared vocabulary as the reason. `--no-related` leaves them out. |
 
 A group is of one kind of unit:
 

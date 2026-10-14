@@ -23,6 +23,7 @@ def suspend_account(account, admin):
     return account
 
 
+# POSITIVE related: check_password repeats the key derivation and storage format
 def hash_password(password, salt=None):
     salt = salt or secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000)

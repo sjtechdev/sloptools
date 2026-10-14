@@ -35,6 +35,9 @@ EXPECTED = [
     ("class", "exact", {"app:Order", "lib:Invoice"}),                  # same fields, from __init__
     ("class", "renamed", {"app:Address", "lib:PostalAddress"}),        # dataclasses, one type differs
     ("class", "renamed", {"app:OrderRepository", "lib:InvoiceRepository"}),   # method for method
+    # related: written differently, same vocabulary
+    ("function", "related", {"app:active_names_loop", "app:active_names_comprehension"}),
+    ("function", "related", {"app:hash_password", "app:check_password"}),    # same key derivation and format
 ]
 
 # pairs that look alike on the surface but mustn't be grouped
@@ -43,8 +46,6 @@ APART = [
     ("app:refund_order", "lib:rebuild_index"),                      # both logging-heavy
     ("app:refund_order", "app:suspend_account"),
     ("app:suspend_account", "lib:rebuild_index"),
-    ("app:active_names_loop", "app:active_names_comprehension"),    # a `related` match, not `near`
-    ("app:hash_password", "app:check_password"),
     ("app:OPEN_MODES", "lib:WRITE_MODES"),                           # two shared values isn't a table
     ("app:Customer", "lib:Tag"),                                     # only id and name in common
 ]
@@ -78,7 +79,8 @@ def _group_of(result: dict) -> dict[str, dict]:
     return {_key(g["unit"], _name(m)): g for g in result["groups"] for m in g["members"]}
 
 
-@pytest.mark.parametrize("unit,tier,names", [e for e in EXPECTED if e[1] != "near"], ids=lambda x: str(x))
+@pytest.mark.parametrize("unit,tier,names", [e for e in EXPECTED if e[1] in ("exact", "renamed")],
+                         ids=lambda x: str(x))
 def test_exact_and_renamed_copies_are_all_found(result, unit, tier, names):
     by_key = _group_of(result)
     found = [by_key.get(_key(unit, n)) for n in names]
@@ -101,7 +103,7 @@ def test_near_recall_and_overall_precision(result):
     def pairs(unit, names):
         return _pairs(_key(unit, n) for n in names)
     expected = set().union(*(pairs(u, names) for u, _, names in EXPECTED))
-    expected_near = set().union(*(pairs(u, names) for u, tier, names in EXPECTED if tier == "near"))
+    expected_near = set().union(*(pairs(u, names) for u, tier, names in EXPECTED if tier in ("near", "related")))
     found = set().union(set(), *(pairs(g["unit"], (_name(m) for m in g["members"])) for g in result["groups"]))
     recall = len(found & expected_near) / len(expected_near)
     precision = len(found & expected) / len(found) if found else 1.0
@@ -127,3 +129,9 @@ def test_method_groups_are_listed_inside_their_class_group(result):
     ]
     top = {_name(m) for g in result["groups"] if g["unit"] == "function" for m in g["members"]}
     assert not any("Repository." in n for n in top)
+
+
+def test_related_pairs_are_related_not_near(result):
+    for names in (n for _, tier, n in EXPECTED if tier == "related"):
+        [g] = [g for g in result["groups"] if names <= {_name(m) for m in g["members"]}]
+        assert g["tier"] == "related" and g["vocabulary"]
