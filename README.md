@@ -68,9 +68,10 @@ paper's published baselines.
 ## slopmerge
 
 Finds functions that have been copied, within one codebase or across
-several, including copies that have drifted since, and reports each set of
-copies as a group: where every copy is, how similar it is, and what differs
-between them. It's built to feed a Claude skill that decides
+several, including copies that have drifted since, and blocks of statements
+pasted into otherwise different functions. Each set of copies is reported
+as a group: where every copy is, how similar it is, and what differs between
+them. Groups are ordered by the lines a merge would save. It's built to feed a Claude skill that decides
 what to consolidate, but the text summary works on its own too.
 
 ```bash
@@ -78,6 +79,7 @@ slopmerge .                                # duplication within one codebase
 slopmerge ../api ../worker ../shared       # ...and between several (all treated as equals)
 slopmerge ../api ../worker --cross-root-only   # only code shared between them
 slopmerge . --min-similarity 0.8           # only close near-copies (default 0.6)
+slopmerge . --units functions              # whole functions only, no blocks
 slopmerge . --json                         # machine-readable output
 slopmerge --help                           # all options
 ```
@@ -90,6 +92,11 @@ Each group has a tier:
 | **renamed** | Identical apart from local names and literal values. The literals and outside names that differ are listed: they're what a merged function would take as arguments. |
 | **near** | The same code with statements added, removed or changed, scored 0–1 against the group's most typical copy. Statements found all over the codebase count for little, so shared boilerplate alone doesn't make a match. The runs of statements that differ are located for each copy. |
 
+A group is either of whole functions or of **blocks**: runs of statements
+copied into different functions (extract-a-helper candidates), as `exact` or
+`renamed` copies. A block's differing outside names are the parameters the
+helper would take.
+
 Code that's duplicated on purpose or by a tool isn't reported: abstract
 methods and stubs, one-line delegations, property accessors, `__init__`
 methods that only store their arguments, attribute-list `__eq__`/`__repr__`/
@@ -97,8 +104,7 @@ methods that only store their arguments, attribute-list `__eq__`/`__repr__`/
 edit"). Neither are functions made only of statements found all over the
 codebase. What was left out is counted in the JSON output.
 
-Duplicated blocks inside functions, classes and constant tables are planned;
-see the [spec](docs/slopmerge-spec.md).
+Classes and constant tables are planned; see the [spec](docs/slopmerge-spec.md).
 
 ## Development
 

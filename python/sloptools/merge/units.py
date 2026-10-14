@@ -1,7 +1,8 @@
 """Roots, and the units of code inside them that can be duplicated.
 
-Functions and methods for now; blocks, classes and constant tables come in
-later milestones.
+A unit is a function (or method), or a block: a run of statements inside any
+body. Blocks are found from `Body` records, one per statement list in a
+file (see blocks.py). Classes and constant tables come in later milestones.
 """
 
 from __future__ import annotations
@@ -23,24 +24,58 @@ class Root:
 
 
 @dataclass
-class Function:
+class Unit:
+    kind: str           # "function" or "block"
     root: str
     rel: str            # relative to its root
-    qualname: str       # Class.method, outer.inner
+    qualname: str       # Class.method, outer.inner; for a block, where it is ("<module>" at top level)
     lo: int             # first line, decorators included
     hi: int
     sloc: int
-    is_method: bool
-    statements: int     # meaningful statements, see levels.meaningful_statements
+    is_method: bool     # a method, or (for a block) inside one
+    statements: int     # meaningful statements, see levels.meaningful_count
     n0: str
     n1: str
-    node: ast.FunctionDef | ast.AsyncFunctionDef
+    nodes: list         # [the function], or the block's statements
     seq: list[levels.Elem]
     boilerplate: str | None = None   # why it's not a unit (see boilerplate.reason)
 
     @property
     def span(self) -> tuple[str, str, int, int]:
         return (self.root, self.rel, self.lo, self.hi)
+
+    def bound_names(self) -> set[str]:
+        own = self.nodes[0] if self.kind == "function" else None
+        return levels.bound_names(self.nodes, own)
+
+
+@dataclass
+class Body:
+    """One statement list (a module, class, function or nested body), cut
+    at imports, with what block matching needs per statement."""
+    root: str
+    rel: str
+    qualname: str
+    is_method: bool
+    in_function: bool           # inside a function, not directly in a module or class body
+    stmts: list
+    n0: list[str]
+    n1: list[str]
+    weight: list[int]           # meaningful statements in each
+    lines: tuple[int, ...]      # the file's code lines, for SLOC
+
+    def first_line(self, i: int) -> int:
+        st = self.stmts[i]
+        return min([st.lineno] + [d.lineno for d in getattr(st, "decorator_list", [])])
+
+    def unit(self, i: int, j: int) -> Unit:
+        """The block stmts[i:j]."""
+        lo, hi = self.first_line(i), self.stmts[j - 1].end_lineno or self.stmts[j - 1].lineno
+        stmts = self.stmts[i:j]
+        return Unit(kind="block", root=self.root, rel=self.rel, qualname=self.qualname, lo=lo, hi=hi,
+                    sloc=count_in_span(self.lines, lo, hi), is_method=self.is_method,
+                    statements=sum(self.weight[i:j]), n0="|".join(self.n0[i:j]), n1="|".join(self.n1[i:j]),
+                    nodes=stmts, seq=levels.block_sequence(stmts))
 
 
 def label_roots(paths: list[Path]) -> list[Root]:
@@ -56,40 +91,79 @@ def label_roots(paths: list[Path]) -> list[Root]:
     return out
 
 
-def functions_in(tree: ast.Module, src: str, root: str, rel: str) -> list[Function]:
-    lines = code_lines(src, tree)
-    out: list[Function] = []
+_LIST_FIELDS = ("body", "orelse", "finalbody")
 
-    def walk(nodes, prefix: str, in_class: bool) -> None:
+
+_BREAKS = (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _segments(stmts: list) -> list[list]:
+    """A statement list without docstrings and no-op statements, cut into
+    runs at imports (a run of imports is never a block worth extracting)
+    and at defs and classes (they are units of their own)."""
+    out, cur = [], []
+    for st in stmts:
+        if isinstance(st, _BREAKS):
+            if cur:
+                out.append(cur)
+            cur = []
+        elif isinstance(st, ast.stmt) and not levels._skippable(st) and not levels._is_docstring(st):
+            cur.append(st)
+    if cur:
+        out.append(cur)
+    return out
+
+
+def units_in(tree: ast.Module, src: str, root: str, rel: str) -> tuple[list[Unit], list[Body]]:
+    """Every function in a file, and every statement list in it."""
+    lines = code_lines(src, tree)
+    functions: list[Unit] = []
+    bodies: list[Body] = []
+
+    def body(stmts: list, where: str, is_method: bool, in_function: bool = True) -> None:
+        for seg in _segments(stmts):
+            hashes = [levels.statement_hashes(st) for st in seg]
+            bodies.append(Body(root, rel, where, is_method, in_function, seg, [h[0] for h in hashes],
+                               [h[1] for h in hashes], [levels.meaningful_count([st]) for st in seg], lines))
+
+    def walk(nodes, prefix: str, in_class: bool, where: str, in_method: bool, inside: bool = False) -> None:
+        """`prefix` names defs found here; `where` names the enclosing scope;
+        `inside` is whether that scope is a function."""
         for n in nodes:
             if isinstance(n, ast.ClassDef):
-                walk(n.body, f"{prefix}{n.name}.", True)
+                body(n.body, f"{prefix}{n.name}", False, in_function=False)
+                walk(n.body, f"{prefix}{n.name}.", True, f"{prefix}{n.name}", False, False)
             elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 lo = min([n.lineno] + [d.lineno for d in n.decorator_list])
                 hi = n.end_lineno or n.lineno
-                out.append(Function(
-                    root=root, rel=rel, qualname=f"{prefix}{n.name}", lo=lo, hi=hi,
+                qualname = f"{prefix}{n.name}"
+                reason = boilerplate.reason(n, in_class)
+                functions.append(Unit(
+                    kind="function", root=root, rel=rel, qualname=qualname, lo=lo, hi=hi,
                     sloc=count_in_span(lines, lo, hi), is_method=in_class,
                     statements=levels.meaningful_statements(n),
-                    n0=levels.n0_hash(n), n1=levels.n1_hash(n), node=n, seq=levels.sequence(n),
-                    boilerplate=boilerplate.reason(n, in_class)))
-                walk(n.body, f"{prefix}{n.name}.", False)
+                    n0=levels.n0_hash(n), n1=levels.n1_hash(n), nodes=[n], seq=levels.sequence(n),
+                    boilerplate=reason))
+                if not reason:       # a boilerplate body is boilerplate as a block too
+                    body(n.body, qualname, in_class)
+                walk(n.body, f"{qualname}.", False, qualname, in_class, True)
             else:
-                # defs inside if/try/with blocks at this level
-                for field in ("body", "orelse", "finalbody"):
-                    sub = getattr(n, field, None)
-                    if isinstance(sub, list):
-                        walk(sub, prefix, in_class)
-                for h in (getattr(n, "handlers", None) or []) + (getattr(n, "cases", None) or []):
-                    walk(h.body, prefix, in_class)
+                # compound statements: their bodies are statement lists too, and may hold defs
+                subs = [getattr(n, f) for f in _LIST_FIELDS if isinstance(getattr(n, f, None), list)]
+                subs += [h.body for h in (getattr(n, "handlers", None) or []) + (getattr(n, "cases", None) or [])]
+                for sub in subs:
+                    body(sub, where, in_method, in_function=inside)
+                    walk(sub, prefix, in_class, where, in_method, inside)
 
-    walk(tree.body, "", False)
-    return out
+    body(tree.body, "<module>", False, in_function=False)
+    walk(tree.body, "", False, "<module>", False)
+    return functions, bodies
 
 
 @dataclass
 class Scan:
-    functions: list[Function]                 # the units: boilerplate left out
+    functions: list[Unit]                     # function units: boilerplate left out
+    bodies: list[Body]                        # statement lists, for blocks
     files: dict[str, int]                     # files scanned, per root
     warnings: list[str] = field(default_factory=list)
     generated: list[str] = field(default_factory=list)       # "root:file" skipped as generated
@@ -97,8 +171,9 @@ class Scan:
 
 
 def collect(roots: list[Root], excludes: tuple[str, ...], include_tests: bool) -> Scan:
-    """Every function under every root that could be part of a duplicate."""
-    scan = Scan(functions=[], files={})
+    """Every function and statement list under every root that could be
+    part of a duplicate."""
+    scan = Scan(functions=[], bodies=[], files={})
     for root in roots:
         rels = list_python_files(root.path, excludes, include_tests)
         scan.files[root.label] = len(rels)
@@ -112,7 +187,9 @@ def collect(roots: list[Root], excludes: tuple[str, ...], include_tests: bool) -
             if boilerplate.generated_file(rel, src, tree):
                 scan.generated.append(f"{root.label}:{rel}")
                 continue
-            for f in functions_in(tree, src, root.label, rel):
+            functions, bodies = units_in(tree, src, root.label, rel)
+            scan.bodies.extend(bodies)
+            for f in functions:
                 if f.boilerplate:
                     scan.boilerplate[f.boilerplate] += 1
                 else:

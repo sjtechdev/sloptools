@@ -102,3 +102,50 @@ class Order:
         if not isinstance(other, Order):
             return NotImplemented
         return (self.id, self.customer_id, self.amount) == (other.id, other.customer_id, other.amount)
+
+
+# POSITIVE block (renamed): the retry loop pasted into lib/export.py:publish_invoice
+def sync_account(account, client):
+    if account.deleted:
+        client.delete(f"/accounts/{account.id}")
+        return None
+    payload = account.to_payload()
+    payload["source"] = "app"
+    payload["tags"] = sorted(account.tags)
+    for attempt in range(3):
+        try:
+            response = client.post("/accounts", payload)
+            break
+        except TimeoutError:
+            logger.warning("timeout, retry %d", attempt)
+            client.backoff(2 ** attempt)
+    else:
+        raise RuntimeError("gave up")
+    account.synced_at = response.timestamp
+    account.version = response.headers.get("ETag")
+    for tag in response.json().get("tags", []):
+        account.tags.add(tag.lower())
+    return response
+
+
+# POSITIVE block (exact): the same name validation in two unrelated functions
+def create_project(owner, name, private=False):
+    if not name:
+        raise ValueError("name is required")
+    name = name.strip()
+    if len(name) > 100:
+        raise ValueError("name is too long")
+    project = owner.projects.create(name=name, private=private)
+    owner.notify("project created", project.id)
+    return project
+
+
+def rename_team(team, name):
+    if not name:
+        raise ValueError("name is required")
+    name = name.strip()
+    if len(name) > 100:
+        raise ValueError("name is too long")
+    team.history.append((team.name, name))
+    team.name = name
+    team.save()

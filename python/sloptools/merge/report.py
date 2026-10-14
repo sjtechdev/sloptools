@@ -8,13 +8,13 @@ from typing import TextIO
 from sloptools import __version__
 from sloptools.merge import evidence
 from sloptools.merge.match import TIERS, Group
-from sloptools.merge.units import Function, Root, Scan
+from sloptools.merge.units import Unit, Root, Scan
 
 SCHEMA_VERSION = 1
 TEXT_TOP_N = 20
 
 
-def _member(f: Function, mid: str, variant: int, shape: int, similarity: float) -> dict:
+def _member(f: Unit, mid: str, variant: int, shape: int, similarity: float) -> dict:
     return {"id": mid, "root": f.root, "file": f.rel, "qualname": f.qualname,
             "lines": [f.lo, f.hi], "sloc": f.sloc, "is_method": f.is_method,
             "variant": variant, "shape": shape, "similarity": similarity}
@@ -32,7 +32,7 @@ def _group(g: Group, gid: str, max_size: int) -> dict:
     lo, hi = g.similarity_range
     out = {
         "id": gid,
-        "unit": "function",
+        "unit": g.unit,
         "tier": g.tier,
         "similarity": {"min": lo, "max": hi},
         "cross_root": len(g.roots) > 1,
@@ -62,7 +62,7 @@ def to_json(roots: list[Root], scan: Scan, groups: list[Group], subsumed: int, s
         "groups": [_group(g, f"g{i}", max_group_size) for i, g in enumerate(groups, 1)],
         "stats": {
             "files": sum(scan.files.values()),
-            "units": {"function": len(scan.functions)},
+            "units": {"function": len(scan.functions), "statement_lists": len(scan.bodies)},
             "groups_by_tier": {t: by_tier.get(t, 0) for t in TIERS},
             "subsumed": subsumed,
             "skipped": {"generated_files": scan.generated,
@@ -81,7 +81,7 @@ def print_text(result: dict, out: TextIO) -> None:
     stats = result["stats"]
     groups = result["groups"]
     w(f"\nslopmerge  {len(result['roots'])} root(s), {stats['files']} files, "
-      f"{stats['units']['function']} functions\n")
+      f"{stats['units']['function']} functions, {stats['units']['statement_lists']} statement lists\n")
     counts = ", ".join(f"{n} {t}" for t, n in stats["groups_by_tier"].items())
     w(f"           {len(groups)} duplicate group(s): {counts}; "
       f"~{sum(g['savings'] for g in groups)} lines removable\n")
@@ -89,11 +89,13 @@ def print_text(result: dict, out: TextIO) -> None:
     for g in groups[:TEXT_TOP_N]:
         roots = ", ".join(g["roots"])
         sim = f"{g['similarity']['min']:.0%}-{g['similarity']['max']:.0%} similar, " if g["tier"] == "near" else ""
-        w(f"\n{g['tier'].upper():<8} {g['member_count']} copies, {sim}~{g['savings']} lines   [{roots}]\n")
+        unit = "" if g["unit"] == "function" else f" {g['unit']}"
+        w(f"\n{g['tier'].upper() + unit:<14} {g['member_count']} copies, {sim}~{g['savings']} lines   [{roots}]\n")
         for m in g["members"]:
             mark = "*" if m["id"] == g["medoid"] else " "
             pct = f"{m['similarity']:>5.0%}" if g["tier"] == "near" else ""
-            w(f"  {mark} {_location(m):<60} {pct} {m['qualname']}\n")
+            where = m["qualname"] if g["unit"] == "function" else f"in {m['qualname']}"
+            w(f"  {mark} {_location(m):<60} {pct} {where}\n")
         if g.get("truncated"):
             w(f"    ... {g['member_count'] - len(g['members'])} more\n")
         params = [p for p in g["parameters"] if p["kind"] != "rename"]

@@ -21,8 +21,10 @@ def build_parser() -> argparse.ArgumentParser:
                          "reported within and between them")
     ap.add_argument("--json", action="store_true", help="print JSON instead of the text summary")
     ap.add_argument("-o", "--output", type=Path, default=None, help="also write JSON here")
+    ap.add_argument("--units", default="functions,blocks", metavar="LIST",
+                    help="what to match, comma-separated: functions, blocks (default both)")
     ap.add_argument("--min-statements", type=int, default=3, metavar="N",
-                    help="smallest function considered, in statements (default 3)")
+                    help="smallest function or block considered, in statements (default 3)")
     ap.add_argument("--min-similarity", type=float, default=0.6, metavar="T",
                     help="lowest similarity (0-1] for a near copy (default 0.6; 1 reports only "
                          "exact and renamed copies)")
@@ -58,15 +60,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.min_statements < 1 or args.max_group_size < 2:
         parser.error("--min-statements must be at least 1 and --max-group-size at least 2")
 
+    units = tuple(u.strip() for u in args.units.split(",") if u.strip())
+    if not units or set(units) - {"functions", "blocks"}:
+        parser.error("--units takes a comma-separated list of: functions, blocks")
+
     excludes = tuple(args.exclude) if args.exclude is not None else DEFAULT_EXCLUDES
     roots = label_roots(paths)
     scan = collect(roots, excludes, args.include_tests)
     order = {r.label: i for i, r in enumerate(roots)}
-    groups, subsumed = find_groups(scan.functions, order, args.min_statements, args.min_similarity)
+    groups, subsumed = find_groups(scan, order, args.min_statements, args.min_similarity, units)
     if args.cross_root_only:
         groups = [g for g in groups if len(g.roots) > 1]
 
-    settings = {"min_similarity": args.min_similarity, "min_statements": args.min_statements, "units": ["functions"],
+    settings = {"min_similarity": args.min_similarity, "min_statements": args.min_statements, "units": list(units),
                 "cross_root_only": args.cross_root_only, "include_tests": args.include_tests,
                 "excludes": list(excludes)}
     result = to_json(roots, scan, groups, subsumed, settings, args.max_group_size)

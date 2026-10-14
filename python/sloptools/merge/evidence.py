@@ -7,14 +7,14 @@ the member's statements match which of the medoid's.
 from __future__ import annotations
 
 from sloptools.merge import levels
-from sloptools.merge.units import Function
+from sloptools.merge.units import Unit
 
 
 def _json_value(v: object) -> object:
     return v if v is None or isinstance(v, (str, int, float, bool)) else repr(v)
 
 
-def parameters(members: list[Function], ids: list[str], medoid: int,
+def parameters(members: list[Unit], ids: list[str], medoid: int,
                alignment: list[list[tuple[int, int]]]) -> list[dict]:
     """Positions in matched statements where members hold different
     literals or names, with each member's value.
@@ -27,7 +27,7 @@ def parameters(members: list[Function], ids: list[str], medoid: int,
     copy) is left out of that entry. Repeated occurrences of the same
     difference are reported once, with a count.
     """
-    bound = [levels.bound_names(m.node) for m in members]
+    bound = [m.bound_names() for m in members]
     onto_medoid = [{j: i for i, j in pairs} for pairs in alignment]
     found: dict[tuple, dict] = {}
     for j, elem in enumerate(members[medoid].seq):
@@ -59,7 +59,7 @@ def _span(elems: list[levels.Elem]) -> list[int]:
     return [min(e.lo for e in elems), max(e.hi for e in elems)]
 
 
-def differences(members: list[Function], ids: list[str], medoid: int,
+def differences(members: list[Unit], ids: list[str], medoid: int,
                 alignment: list[list[tuple[int, int]]]) -> list[dict]:
     """For each member that isn't a renamed copy of the medoid, the runs of
     statements between matched ones: "added" (only in the member), "removed"
