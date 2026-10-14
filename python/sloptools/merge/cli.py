@@ -28,6 +28,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--min-similarity", type=float, default=0.6, metavar="T",
                     help="lowest similarity (0-1] for a near copy (default 0.6; 1 reports only "
                          "exact and renamed copies)")
+    ap.add_argument("--no-related", action="store_true",
+                    help="leave out the `related` tier (functions written differently that use the same things)")
     ap.add_argument("--cross-root-only", action="store_true",
                     help="only report groups that span two or more roots")
     ap.add_argument("--include-tests", action="store_true", help="scan test files too")
@@ -68,12 +70,13 @@ def main(argv: list[str] | None = None) -> int:
     roots = label_roots(paths)
     scan = collect(roots, excludes, args.include_tests)
     order = {r.label: i for i, r in enumerate(roots)}
-    groups, subsumed = find_groups(scan, order, args.min_statements, args.min_similarity, units)
+    groups, subsumed = find_groups(scan, order, args.min_statements, args.min_similarity, units,
+                                   with_related=not args.no_related)
     if args.cross_root_only:
         groups = [g for g in groups if len(g.roots) > 1]
 
     settings = {"min_similarity": args.min_similarity, "min_statements": args.min_statements, "units": list(units),
-                "cross_root_only": args.cross_root_only, "include_tests": args.include_tests,
+                "related": not args.no_related, "cross_root_only": args.cross_root_only, "include_tests": args.include_tests,
                 "excludes": list(excludes)}
     result = to_json(roots, scan, groups, subsumed, settings, args.max_group_size)
     text = json.dumps(result, indent=2)

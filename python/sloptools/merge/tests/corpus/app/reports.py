@@ -73,7 +73,7 @@ def refund_order(order, reason):
     return order
 
 
-# NEGATIVE related-not-near: a loop and a comprehension computing the same thing
+# POSITIVE related (not near): a loop and a comprehension computing the same thing
 def active_names_loop(users):
     names = []
     for user in users:

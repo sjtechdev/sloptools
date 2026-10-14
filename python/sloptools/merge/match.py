@@ -19,10 +19,10 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from sloptools.merge import blocks, classes, constants, index, levels
+from sloptools.merge import blocks, classes, constants, index, levels, related
 from sloptools.merge.units import Scan, Unit
 
-TIERS = ("exact", "renamed", "near")
+TIERS = ("exact", "renamed", "near", "related")
 
 
 @dataclass
@@ -120,9 +120,11 @@ def _distinctive_test(shapes: list[list[Unit]]):
 
 
 def find_groups(scan: Scan, root_order: dict[str, int], min_statements: int, min_similarity: float,
-                units: tuple[str, ...] = ("functions", "blocks", "constants", "classes")) -> tuple[list[Group], int]:
+                units: tuple[str, ...] = ("functions", "blocks", "constants", "classes"),
+                with_related: bool = True) -> tuple[list[Group], int]:
     """Duplicate groups, biggest estimated savings first, then by tier and
-    location; and the number of groups dropped as subsumed."""
+    location, with `related` groups (speculative) last; and the number of
+    groups dropped as subsumed."""
     def where(f: Unit):
         return (root_order[f.root], f.rel, f.lo, f.qualname)
 
@@ -153,6 +155,8 @@ def find_groups(scan: Scan, root_order: dict[str, int], min_statements: int, min
 
     function_groups = _cluster(shapes, keys, w, min_similarity, score, nested, where)
     groups: list[Group] = list(function_groups) if "functions" in units else []
+    if with_related and "functions" in units:
+        groups += _related_groups(shapes, function_groups, min_similarity, nested, where)
     if "classes" in units:
         eligible = [f for ms in shapes for f in ms]
         class_groups = _class_groups(scan.classes, eligible, function_groups, min_similarity, where)
@@ -164,7 +168,7 @@ def find_groups(scan: Scan, root_order: dict[str, int], min_statements: int, min
         groups += _constant_groups(scan.constants, min_similarity, where)
 
     kept_groups = [g for g in groups if not _subsumed(g, groups)]
-    kept_groups.sort(key=lambda g: (-g.savings, TIERS.index(g.tier), where(g.members[0])))
+    kept_groups.sort(key=lambda g: (g.tier == "related", -g.savings, TIERS.index(g.tier), where(g.members[0])))
     return kept_groups, len(groups) - len(kept_groups)
 
 
@@ -326,4 +330,26 @@ def _nest_method_groups(groups: list[Group], class_groups: list[Group]) -> list[
             out.append(g)
         else:
             home.children.append(g)
+    return out
+
+
+def _related_groups(shapes: list[list[Unit]], function_groups: list[Group], threshold: float,
+                    nested_shapes, where) -> list[Group]:
+    """Functions that matched nothing structurally, grouped by vocabulary."""
+    grouped = {id(m) for g in function_groups for m in g.members}
+    lone = [i for i, ms in enumerate(shapes) if len(ms) == 1 and id(ms[0]) not in grouped]
+    vocab = [related.vocabulary(ms[0]) for ms in shapes]
+    w = index.idf_weights(vocab)           # frequencies over all functions, not only the lone ones
+    sub = [shapes[i] for i in lone]
+    keys = [vocab[i] for i in lone]
+    cache: dict[tuple[int, int], float] = {}
+
+    def score(a: int, b: int) -> tuple[float, list]:
+        if (a, b) not in cache:
+            cache[(a, b)] = related.score(keys[a], keys[b], sub[a][0].statements, sub[b][0].statements, w)
+        return cache[(a, b)], []
+
+    out = _cluster(sub, keys, w, threshold, score, lambda a, b: nested_shapes(lone[a], lone[b]), where)
+    for g in out:
+        g.tier = "related"
     return out
