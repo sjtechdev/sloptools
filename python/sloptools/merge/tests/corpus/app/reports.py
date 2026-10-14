@@ -8,6 +8,9 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 TAX_RATE = 0.2
 
+# POSITIVE constant (exact): the same column list in three modules
+REPORT_COLUMNS = ["order_id", "customer_name", "total", "status", "placed_at"]
+
 
 # POSITIVE exact: verbatim copy of lib/stats.py:summarise_orders (restyled)
 def summarise_orders(orders):

@@ -24,7 +24,7 @@ def test_output_shape(run):
     assert [r["label"] for r in out["roots"]] == ["shop"]
     assert out["roots"][0]["files"] == 1
     # each function's body, and each for loop's body (a module of only defs has no list of its own)
-    assert out["stats"]["units"] == {"function": 2, "statement_lists": 4}
+    assert out["stats"]["units"] == {"function": 2, "statement_lists": 4, "constant": 0}
     assert out["stats"]["groups_by_tier"] == {"exact": 1, "renamed": 0, "near": 0}
     [g] = out["groups"]
     assert g["id"] == "g1" and g["unit"] == "function" and g["member_count"] == 2

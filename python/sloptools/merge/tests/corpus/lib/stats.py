@@ -5,6 +5,7 @@ from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 TAX_RATE = 0.2
+REPORT_COLUMNS = ("order_id", "customer_name", "total", "status", "placed_at")
 
 
 def summarise_orders(orders):

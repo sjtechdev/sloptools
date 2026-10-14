@@ -29,6 +29,9 @@ EXPECTED = [
     ("function", "near", {"app:normalise_email", "lib:clean_email"}),
     ("block", "renamed", {"app:sync_account", "lib:publish_invoice"}),
     ("block", "exact", {"app:create_project", "app:rename_team"}),
+    ("constant", "exact", {"app:REPORT_COLUMNS", "lib:REPORT_COLUMNS", "lib:COLUMNS"}),
+    ("constant", "renamed", {"app:RETRY_POLICY", "lib:RETRY_POLICY"}),
+    ("constant", "near", {"app:ACCOUNT_COLUMNS", "lib:ACCOUNT_FIELDS"}),
 ]
 
 # pairs that look alike on the surface but mustn't be grouped
@@ -39,6 +42,7 @@ APART = [
     ("app:suspend_account", "lib:rebuild_index"),
     ("app:active_names_loop", "app:active_names_comprehension"),    # a `related` match, not `near`
     ("app:hash_password", "app:check_password"),
+    ("app:OPEN_MODES", "lib:WRITE_MODES"),                           # two shared values isn't a table
 ]
 
 # currently 1.0 each; a floor leaves room for tuning without hiding a regression

@@ -6,6 +6,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+COLUMNS = ["order_id", "customer_name", "total", "status", "placed_at"]
+
+# POSITIVE constant (near): app/accounts.py:ACCOUNT_COLUMNS without "plan"
+ACCOUNT_FIELDS = ("id", "email", "credit", "created_at", "active")
+
+# POSITIVE constant (renamed): app/accounts.py:RETRY_POLICY, same keys, other values
+RETRY_POLICY = {"attempts": 5, "backoff": 1.5, "timeout": 10}
+
+# NEGATIVE constant: shares only two values with app/accounts.py:OPEN_MODES
+WRITE_MODES = ("w", "wb", "a")
+
 
 # POSITIVE near: export_orders_csv with a header option added
 def export_rows_csv(rows, path, header=True):

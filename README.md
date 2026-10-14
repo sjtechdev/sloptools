@@ -79,7 +79,7 @@ slopmerge .                                # duplication within one codebase
 slopmerge ../api ../worker ../shared       # ...and between several (all treated as equals)
 slopmerge ../api ../worker --cross-root-only   # only code shared between them
 slopmerge . --min-similarity 0.8           # only close near-copies (default 0.6)
-slopmerge . --units functions              # whole functions only, no blocks
+slopmerge . --units functions,constants    # leave out blocks
 slopmerge . --json                         # machine-readable output
 slopmerge --help                           # all options
 ```
@@ -92,10 +92,15 @@ Each group has a tier:
 | **renamed** | Identical apart from local names and literal values. The literals and outside names that differ are listed: they're what a merged function would take as arguments. |
 | **near** | The same code with statements added, removed or changed, scored 0–1 against the group's most typical copy. Statements found all over the codebase count for little, so shared boilerplate alone doesn't make a match. The runs of statements that differ are located for each copy. |
 
-A group is either of whole functions or of **blocks**: runs of statements
-copied into different functions (extract-a-helper candidates), as `exact` or
-`renamed` copies. A block's differing outside names are the parameters the
-helper would take.
+A group is of one kind of unit:
+
+- **functions** (and methods);
+- **blocks**: runs of statements copied into different functions
+  (extract-a-helper candidates), as `exact` or `renamed` copies. A block's
+  differing outside names are the parameters the helper would take;
+- **constants**: the same literal list, tuple, set or dict in several places
+  (column lists, choice tables, config maps). Dicts with the same keys and
+  other values are `renamed`; near copies list the entries that differ.
 
 Code that's duplicated on purpose or by a tool isn't reported: abstract
 methods and stubs, one-line delegations, property accessors, `__init__`
@@ -104,7 +109,7 @@ methods that only store their arguments, attribute-list `__eq__`/`__repr__`/
 edit"). Neither are functions made only of statements found all over the
 codebase. What was left out is counted in the JSON output.
 
-Classes and constant tables are planned; see the [spec](docs/slopmerge-spec.md).
+Classes are planned; see the [spec](docs/slopmerge-spec.md).
 
 ## Development
 

@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from sloptools.merge import blocks, index, levels
+from sloptools.merge import blocks, constants, index, levels
 from sloptools.merge.units import Scan, Unit
 
 TIERS = ("exact", "renamed", "near")
@@ -28,7 +28,7 @@ TIERS = ("exact", "renamed", "near")
 @dataclass
 class Group:
     tier: str
-    members: list[Unit]     # sorted by location; all functions, or all blocks
+    members: list[Unit]     # sorted by location; all of one kind (function, block, constant)
     variants: list[int]         # per member: 1-based index of its N0 form
     shapes: list[int]           # per member: 1-based index of its N1 form
     medoid: int                 # index into members
@@ -116,7 +116,7 @@ def _distinctive_test(shapes: list[list[Unit]]):
 
 
 def find_groups(scan: Scan, root_order: dict[str, int], min_statements: int, min_similarity: float,
-                units: tuple[str, ...] = ("functions", "blocks")) -> tuple[list[Group], int]:
+                units: tuple[str, ...] = ("functions", "blocks", "constants")) -> tuple[list[Group], int]:
     """Duplicate groups, biggest estimated savings first, then by tier and
     location; and the number of groups dropped as subsumed."""
     def where(f: Unit):
@@ -147,16 +147,36 @@ def find_groups(scan: Scan, root_order: dict[str, int], min_statements: int, min
         construction; they aren't copies of each other."""
         return any(_contains(x, y) or _contains(y, x) for x in shapes[a] for y in shapes[b])
 
+    groups: list[Group] = []
+    if "functions" in units:
+        groups += _cluster(shapes, keys, w, min_similarity, score, nested, where)
+    if "blocks" in units:
+        groups.extend(_block_group(copies, where) for copies in blocks.find(scan.bodies, min_statements, distinctive))
+    if "constants" in units:
+        groups += _constant_groups(scan.constants, min_similarity, where)
+
+    kept_groups = [g for g in groups if not _subsumed(g, groups)]
+    kept_groups.sort(key=lambda g: (-g.savings, TIERS.index(g.tier), where(g.members[0])))
+    return kept_groups, len(groups) - len(kept_groups)
+
+
+def _cluster(shapes: list[list[Unit]], keys: list[list[str]], w: dict[str, float], threshold: float,
+             score, nested, where) -> list[Group]:
+    """Groups from shapes: one per shape with two or more members and no
+    near neighbours, and `near` groups of shapes scoring at least
+    `threshold`, split at the medoid against chaining. `score(a, b)` gives
+    shape a's similarity to b and its alignment onto b; `nested(a, b)` says
+    two shapes must never share a group."""
     edges: dict[tuple[int, int], float] = {}
-    for a, b in index.candidate_pairs(keys, w, min_similarity):
+    for a, b in index.candidate_pairs(keys, w, threshold):
         if nested(a, b):
             continue
         sim = score(a, b)[0]
-        if sim >= min_similarity:
+        if sim >= threshold:
             edges[(a, b)] = edges[(b, a)] = sim
 
     groups: list[Group] = []
-    work = _components(list(range(len(shapes))), edges) if shapes and "functions" in units else []
+    work = _components(list(range(len(shapes))), edges) if shapes else []
     while work:
         comp = work.pop(0)
         if len(comp) == 1:
@@ -170,20 +190,14 @@ def find_groups(scan: Scan, root_order: dict[str, int], min_statements: int, min
         # closest to the medoid first; never two members where one is nested in the other
         kept = [medoid]
         for s in sorted((s for s in comp if s != medoid), key=lambda s: (-score(s, medoid)[0], s)):
-            if score(s, medoid)[0] >= min_similarity and not any(nested(s, k) for k in kept):
+            if score(s, medoid)[0] >= threshold and not any(nested(s, k) for k in kept):
                 kept.append(s)
         kept.sort()
         rest = [s for s in comp if s not in kept]
         groups.append(_group(shapes, kept, medoid, score, where))
         if rest:
             work.extend(_components(rest, edges))
-
-    if "blocks" in units:
-        groups.extend(_block_group(copies, where) for copies in blocks.find(scan.bodies, min_statements, distinctive))
-
-    kept_groups = [g for g in groups if not _subsumed(g, groups)]
-    kept_groups.sort(key=lambda g: (-g.savings, TIERS.index(g.tier), where(g.members[0])))
-    return kept_groups, len(groups) - len(kept_groups)
+    return groups
 
 
 def _group(shapes: list[list[Unit]], comp: list[int], medoid_shape: int, score, where) -> Group:
@@ -223,3 +237,22 @@ def _block_group(copies: list[Unit], where) -> Group:
     return Group(tier="exact" if len(n0_order) == 1 else "renamed", members=members, variants=variants,
                  shapes=[1] * len(members), medoid=variants.index(common), similarity=[1.0] * len(members),
                  alignment=[[(i, i) for i in range(len(u.seq))] for u in members])
+
+
+def _constant_groups(units: list[Unit], threshold: float, where) -> list[Group]:
+    """Constant tables, grouped like functions: equal structure (N1) is one
+    shape, and shapes are joined into near groups by their weighted overlap."""
+    by_n1: dict[str, list[Unit]] = defaultdict(list)
+    for u in units:
+        by_n1[u.n1].append(u)
+    shapes = sorted((sorted(us, key=where) for us in by_n1.values()), key=lambda us: where(us[0]))
+    keys = [constants.elements(us[0].nodes[0]) for us in shapes]
+    w = index.idf_weights(keys)
+    cache: dict[tuple[int, int], float] = {}
+
+    def score(a: int, b: int) -> tuple[float, list]:
+        if (a, b) not in cache:
+            cache[(a, b)] = constants.score(shapes[a][0], shapes[b][0], w)
+        return cache[(a, b)], []
+
+    return _cluster(shapes, keys, w, threshold, score, lambda a, b: False, where)

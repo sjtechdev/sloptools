@@ -7,6 +7,9 @@ import secrets
 
 logger = logging.getLogger(__name__)
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[a-z]{2,}$")
+ACCOUNT_COLUMNS = ["id", "email", "credit", "created_at", "active", "plan"]
+RETRY_POLICY = {"attempts": 3, "backoff": 2.0, "timeout": 30}
+OPEN_MODES = ("r", "rb", "w", "wb")
 
 
 # NEGATIVE: logging-heavy, unrelated to refund_order and rebuild_index

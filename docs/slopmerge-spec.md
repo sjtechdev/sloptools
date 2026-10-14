@@ -88,7 +88,7 @@ One root works too. Each root is labelled by its directory name, with
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--units` | `functions,blocks` | Which unit types to match (`classes` and `constants` to come). |
+| `--units` | `functions,blocks,constants` | Which unit types to match (`classes` to come). |
 | `--min-similarity` | `0.6` | Lowest similarity reported for the `near` and `related` tiers. |
 | `--no-related` | off | Skip the `related` (vocabulary-based) tier. |
 | `--min-statements` | `3` | Smallest function or block considered, after boilerplate is removed. |
@@ -111,7 +111,7 @@ exists, and a normalised representation at each level (see below).
 | **function** | Every `def` and `async def`, including methods and nested functions. | The main consolidation unit. The docstring is dropped before comparing. |
 | **block** | A run of consecutive statements inside any body (module, class, function or nested), holding at least `--min-statements` meaningful statements; one big duplicated loop counts. | Catches duplicated logic inside otherwise different functions ("extract a helper"). See [Blocks](#blocks). |
 | **class** | A `class` definition, compared on its methods and its declared fields. | Two kinds of match. *Behavioural*: most of the methods match pairwise. *Data shape*: the same set of fields, e.g. two dataclasses, Pydantic models or TypedDicts with the same field names (and types, where annotated). |
-| **constant** | A literal list, tuple, set or dict made only of constants (strings, numbers, booleans, `None`), at least 3 elements, or a module-level assignment of one. | Column lists, choice tables, config maps. Sets and dict keys are compared ignoring order. |
+| **constant** | A literal list, tuple, set or dict made only of constants (strings, numbers, booleans, `None`) and nested literals, with at least 3 distinct entries. Only the outermost literal counts. | Column lists, choice tables, config maps. See [Constant tables](#constant-tables). |
 
 ## Blocks
 
@@ -149,6 +149,35 @@ bind is a `reference`: a parameter the extracted helper would take.
 Near blocks (copied runs that have since drifted) are not matched yet. A
 drifted copy that dominates its function is still found as a `near`
 function copy.
+
+## Constant tables
+
+A constant is any list, tuple, set or dict literal built only from
+constants, nested literals included (so `[("draft", "Draft"), ...]` is one
+table), with at least three distinct entries, wherever it appears: a module
+or class assignment, a default argument, inside a function. Dunder targets
+(`__all__`, `__slots__`) are skipped. A constant assigned to a name is
+named by it (`COLUMNS`, `ReportView.columns`); otherwise by the scope it's
+in.
+
+- **N0** is the whole value. Lists and tuples compare in order; sets and
+  dicts ignore order.
+- **N1** is the structure: for a dict its keys, for anything else its
+  value. Dicts with the same keys and different values are `renamed`
+  copies, and each differing value is a parameter (with its key).
+- **Near** copies are scored on their entries (a dict's keys) by IDF-
+  weighted overlap, `2 · W(shared) / (W(a) + W(b))`, so sharing rare
+  entries counts for more than sharing `"id"` and `"name"`. They must share
+  at least three entries: two 3-tuples sharing two values aren't copies of
+  one table. Their `differences` list the entries each copy has that the
+  medoid lacks (`added`) and the medoid's entries it lacks (`removed`), as
+  `values` rather than lines.
+
+Grouping (components, medoid, chaining) is the same as for functions. A
+list and a set with the same entries end up in one near group at
+similarity 1.0, with different `shape`s. Constants inside a function or
+block group are subsumed by it. Constant members carry `entries`, their
+number of entries.
 
 ## Normalisation levels
 
@@ -355,7 +384,7 @@ without first re-deriving the facts from the source:
       "children": []
     }
   ],
-  "stats": {"files": 412, "units": {"function": 3120, "statement_lists": 9870, "class": 240, "constant": 95}, "groups_by_tier": {"exact": 4, "renamed": 9, "near": 21, "related": 12}, "subsumed": 7,
+  "stats": {"files": 412, "units": {"function": 3120, "statement_lists": 9870, "constant": 95, "class": 240}, "groups_by_tier": {"exact": 4, "renamed": 9, "near": 21, "related": 12}, "subsumed": 7,
             "skipped": {"generated_files": ["api:proto/user_pb2.py"], "boilerplate_functions": {"accessor": 31, "stub": 12}}},
   "warnings": []
 }
@@ -409,16 +438,18 @@ It is not a stable interface.
     added, removed or edited; reordered independent statements; the same
     method overridden in several subclasses; a retry loop pasted into two
     different functions in different roots (a renamed block); a validation
-    snippet copied verbatim into two functions (an exact block). Still to
-    add with milestone 4: two dataclasses with the same fields, the same
-    column list in three modules.
+    snippet copied verbatim into two functions (an exact block); the same
+    column list in three modules, as a list and a tuple (an exact constant);
+    a column list with one extra column (a near constant); a retry policy
+    dict with the same keys and other values (a renamed constant). Still to
+    add with milestone 4: two dataclasses with the same fields.
   - negatives: property boilerplate; `__init__` assignment lists and
     attribute-list `__eq__` copied between record classes; one-line
     delegations; functions with the same silhouette but all-different
     operations; unrelated functions that both use `logging` heavily; a loop
     and a comprehension computing the same thing (to become a `related`
     match with milestone 5, never `near`); a verbatim copy inside a
-    generated `_pb2` file.
+    generated `_pb2` file; two small tuples sharing only two values.
 
   The test asserts there are no missed `exact`/`renamed` matches and that
   no negative pair is grouped, and measures `near` recall and overall
