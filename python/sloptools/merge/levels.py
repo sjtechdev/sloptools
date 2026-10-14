@@ -136,29 +136,38 @@ def _nested(n: ast.AST) -> list[list]:
     return lists
 
 
+def meaningful_count(stmts: list) -> int:
+    """Statements in `stmts`, at any depth, not counting docstrings, `pass`,
+    `...` and bare `return`."""
+    return sum(1 + sum(meaningful_count(sub) for sub in _nested(s)) for s in _statements(stmts))
+
+
 def meaningful_statements(fn: ast.AST) -> int:
-    """Statements in the body, at any depth, not counting docstrings,
-    `pass`, `...` and bare `return`."""
-    def count(stmts: list) -> int:
-        return sum(1 + sum(count(sub) for sub in _nested(s)) for s in _statements(stmts))
-    return count(_body(fn))
+    return meaningful_count(_body(fn))
 
 
-def bound_names(fn: ast.AST) -> set[str]:
-    """Names the function binds itself: parameters, assignment and loop
-    targets, nested defs, `except ... as`, imports."""
+def statement_hashes(st: ast.stmt) -> tuple[str, str]:
+    """(N0, N1) hash of one whole statement, nested bodies included."""
+    return _digest(st, None, None, False), _digest(st, None, None, True)
+
+
+def bound_names(nodes: list[ast.AST], own: ast.AST | None = None) -> set[str]:
+    """Names the code binds itself: parameters, assignment and loop targets,
+    nested defs, `except ... as`, imports. `own` is the function whose own
+    name doesn't count (it's bound by the code around it)."""
     out: set[str] = set()
-    for n in ast.walk(fn):
-        if isinstance(n, ast.arg):
-            out.add(n.arg)
-        elif isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
-            out.add(n.id)
-        elif isinstance(n, _DEFS) and n is not fn:
-            out.add(n.name)
-        elif isinstance(n, ast.ExceptHandler) and n.name:
-            out.add(n.name)
-        elif isinstance(n, (ast.Import, ast.ImportFrom)):
-            out.update((a.asname or a.name).split(".")[0] for a in n.names)
+    for node in nodes:
+        for n in ast.walk(node):
+            if isinstance(n, ast.arg):
+                out.add(n.arg)
+            elif isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+                out.add(n.id)
+            elif isinstance(n, _DEFS) and n is not own:
+                out.add(n.name)
+            elif isinstance(n, ast.ExceptHandler) and n.name:
+                out.add(n.name)
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                out.update((a.asname or a.name).split(".")[0] for a in n.names)
     return out
 
 
@@ -184,10 +193,20 @@ def _header_end(n: ast.AST) -> int:
 
 
 def sequence(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[Elem]:
+    """The N1 statement sequence of a function, starting with its signature."""
+    return _flatten([fn], fn)
+
+
+def block_sequence(stmts: list) -> list[Elem]:
+    """The N1 statement sequence of a run of statements."""
+    return _flatten(_statements(stmts), None)
+
+
+def _flatten(nodes: list, fn: ast.AST | None) -> list[Elem]:
     out: list[Elem] = []
 
     def add(n: ast.AST) -> None:
-        lo = getattr(n, "lineno", None) or (out[-1].hi if out else fn.lineno)
+        lo = getattr(n, "lineno", None) or (out[-1].hi if out else nodes[0].lineno)
         hi = _header_end(n) if hasattr(n, "lineno") else lo
         out.append(Elem(_digest(n, fn, n, True), lo, hi, n, fn))
 
@@ -212,7 +231,8 @@ def sequence(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> list[Elem]:
             for st in finalbody:
                 visit(st)
 
-    visit(fn)
+    for n in nodes:
+        visit(n)
     return out
 
 

@@ -151,7 +151,7 @@ def test_nested_function_copied_with_its_parent_is_subsumed(run):
     out = run({"r": {"m.py": outer.format(n="a") + outer.format(n="b")}})
     [g] = groups(out)
     assert [m["qualname"] for m in g["members"]] == ["outer_a", "outer_b"]
-    assert out["stats"]["subsumed"] == 1
+    assert out["stats"]["subsumed"] == 2      # score's own group, and the block that is its body
 
 
 def test_cross_root_only(run):
@@ -171,7 +171,7 @@ def test_variants_and_medoid_pick_the_most_common_form(run):
     assert g["medoid"] == "m2"
 
 
-def test_groups_ordered_by_tier_then_savings(run):
+def test_groups_ordered_by_savings_then_tier(run):
     small = """
 def small_{n}(a):
     b = a.one()
@@ -180,8 +180,9 @@ def small_{n}(a):
 """
     out = run({"r": {"a.py": FETCH, "b.py": FETCH_RENAMED,
                      "c.py": small.format(n="x") + small.format(n="y"), "d.py": FETCH, "e.py": FETCH}})
+    # the bigger saving comes first, even though it's the less certain tier
     assert [(g["tier"], g["member_count"], g["savings"]) for g in groups(out)] == [
-        ("exact", 2, 4), ("renamed", 4, 18)]
+        ("renamed", 4, 18), ("exact", 2, 4)]
 
 
 def test_a_function_and_one_nested_inside_it_never_share_a_group(run):
@@ -235,7 +236,11 @@ def test_chained_similarity_is_split_at_the_medoid(run):
         names = {m["qualname"] for m in g["members"]}
         assert not {"a", "d"} <= names
         assert all(m["similarity"] >= 0.6 for m in g["members"])
-    assert [sorted(m["qualname"] for m in g["members"]) for g in groups(out)] == [["a", "b", "c"]]
+    functions = [g for g in groups(out) if g["unit"] == "function"]
+    assert [sorted(m["qualname"] for m in g["members"]) for g in functions] == [["a", "b", "c"]]
+    # c and d still share a verbatim run of four statements, reported as a block
+    [block] = [g for g in groups(out) if g["unit"] == "block"]
+    assert [m["qualname"] for m in block["members"]] == ["c", "d"] and block["tier"] == "exact"
 
 
 def test_near_group_absorbs_renamed_copies_and_labels_their_shape(run):

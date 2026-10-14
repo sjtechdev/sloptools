@@ -88,7 +88,7 @@ One root works too. Each root is labelled by its directory name, with
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--units` | `functions,blocks,classes,constants` | Which unit types to match. |
+| `--units` | `functions,blocks` | Which unit types to match (`classes` and `constants` to come). |
 | `--min-similarity` | `0.6` | Lowest similarity reported for the `near` and `related` tiers. |
 | `--no-related` | off | Skip the `related` (vocabulary-based) tier. |
 | `--min-statements` | `3` | Smallest function or block considered, after boilerplate is removed. |
@@ -109,9 +109,46 @@ exists, and a normalised representation at each level (see below).
 | Unit | What it is | Notes |
 |---|---|---|
 | **function** | Every `def` and `async def`, including methods and nested functions. | The main consolidation unit. The docstring is dropped before comparing. |
-| **block** | A run of consecutive statements inside a body (function, method or module level), at least `--min-statements` long. | Catches duplicated logic inside otherwise different functions ("extract a helper"). Blocks covered by a matched function group are dropped. |
+| **block** | A run of consecutive statements inside any body (module, class, function or nested), holding at least `--min-statements` meaningful statements; one big duplicated loop counts. | Catches duplicated logic inside otherwise different functions ("extract a helper"). See [Blocks](#blocks). |
 | **class** | A `class` definition, compared on its methods and its declared fields. | Two kinds of match. *Behavioural*: most of the methods match pairwise. *Data shape*: the same set of fields, e.g. two dataclasses, Pydantic models or TypedDicts with the same field names (and types, where annotated). |
 | **constant** | A literal list, tuple, set or dict made only of constants (strings, numbers, booleans, `None`), at least 3 elements, or a module-level assignment of one. | Column lists, choice tables, config maps. Sets and dict keys are compared ignoring order. |
+
+## Blocks
+
+Blocks are matched by hash, like the `exact` and `renamed` function tiers,
+so no duplicated block is missed:
+
+1. Every statement list is cut at imports, `def`s and `class`es (a run of
+   imports is never worth extracting, and definitions are units of their
+   own). Docstrings, `pass`, `...` and bare `return` are left out.
+2. Each position seeds the shortest run starting there that holds at
+   least `--min-statements` meaningful statements, counting nested ones.
+3. Runs with equal N1 hashes (whole statements, nested bodies included),
+   found in two or more places that don't overlap, are a candidate group.
+4. The group is extended statement by statement, forwards and backwards,
+   while every copy still agrees, giving maximal blocks. A group is
+   `exact` if the blocks' N0 hashes are equal too, and `renamed` otherwise.
+
+A block group is dropped if:
+- it is only plain stores (`self.x = x`, `aliases = ['mips']`) and import
+  guards (`try: import x / except ImportError: x = None`, `if
+  TYPE_CHECKING: ...`);
+- it is only assignments at module or class level: declarations, whatever
+  the values (constant tables and class data shapes are their own units);
+- its copies are back to back in one statement list (`x.push(1)` six
+  times is repetition, not a block pasted in several places);
+- none of its statements is distinctive (the common-statement floor);
+- the body it's in belongs to a boilerplate function;
+- every copy sits inside members of one function group (rule 4 of [What
+  "meaningful" means](#what-meaningful-means)), including near groups.
+
+A block's `qualname` names where it is: the enclosing function or class, or
+`<module>`. In its `parameters`, a name that the block uses but doesn't
+bind is a `reference`: a parameter the extracted helper would take.
+
+Near blocks (copied runs that have since drifted) are not matched yet. A
+drifted copy that dominates its function is still found as a `near`
+function copy.
 
 ## Normalisation levels
 
@@ -318,7 +355,7 @@ without first re-deriving the facts from the source:
       "children": []
     }
   ],
-  "stats": {"files": 412, "units": {"function": 3120, "block": 0, "class": 240, "constant": 95}, "groups_by_tier": {"exact": 4, "renamed": 9, "near": 21, "related": 12}, "subsumed": 7,
+  "stats": {"files": 412, "units": {"function": 3120, "statement_lists": 9870, "class": 240, "constant": 95}, "groups_by_tier": {"exact": 4, "renamed": 9, "near": 21, "related": 12}, "subsumed": 7,
             "skipped": {"generated_files": ["api:proto/user_pb2.py"], "boilerplate_functions": {"accessor": 31, "stub": 12}}},
   "warnings": []
 }
@@ -329,9 +366,11 @@ without first re-deriving the facts from the source:
 - A group with more than `--max-group-size` members lists only that many,
   with `"truncated": true`. `member_count` is always the full count.
 - `stats.subsumed` counts groups dropped by the subsumption rule.
-- Groups are sorted by tier (`exact` → `related`), then by `savings`
-  descending, then by first location. The same input always gives the same
-  output, byte for byte.
+- Groups are sorted by `savings`, largest first, then by tier (`exact` →
+  `related`), then by first location, so the biggest consolidation wins
+  lead. (An earlier draft sorted by tier first, which put three-line exact
+  blocks above hundred-line near copies.) The same input always gives the
+  same output, byte for byte.
 - Any change to the schema bumps `schema_version`.
 
 ### Text
@@ -368,9 +407,11 @@ It is not a stable interface.
   counts against precision.
   - positives: verbatim copies; renamed copies; copies with 1–3 statements
     added, removed or edited; reordered independent statements; the same
-    method overridden in several subclasses. To add with milestone 4:
-    duplicated blocks inside different functions, two dataclasses with the
-    same fields, the same column list in three modules.
+    method overridden in several subclasses; a retry loop pasted into two
+    different functions in different roots (a renamed block); a validation
+    snippet copied verbatim into two functions (an exact block). Still to
+    add with milestone 4: two dataclasses with the same fields, the same
+    column list in three modules.
   - negatives: property boilerplate; `__init__` assignment lists and
     attribute-list `__eq__` copied between record classes; one-line
     delegations; functions with the same silhouette but all-different

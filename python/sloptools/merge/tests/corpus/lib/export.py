@@ -116,3 +116,29 @@ class Invoice:
         if not isinstance(other, Invoice):
             return NotImplemented
         return (self.id, self.customer_id, self.amount) == (other.id, other.customer_id, other.amount)
+
+
+def publish_invoice(invoice, client, dry_run=False):
+    if dry_run:
+        return None
+    if invoice.total() <= 0:
+        raise ValueError(f"nothing to invoice: {invoice.id}")
+    currency = invoice.customer.currency or "EUR"
+    lines = [line.as_dict(currency) for line in invoice.lines if not line.void]
+    payload = invoice.serialise(include_lines=True)
+    payload["lines"] = lines
+    payload["due"] = invoice.issued + invoice.terms.days
+    for attempt in range(3):
+        try:
+            response = client.post("/invoices", payload)
+            break
+        except TimeoutError:
+            logger.warning("timeout, retry %d", attempt)
+            client.backoff(2 ** attempt)
+    else:
+        raise RuntimeError("gave up")
+    invoice.published = True
+    invoice.remote_id = response.id
+    invoice.customer.balance += invoice.total()
+    logger.info("published %s", invoice.id)
+    return response.id

@@ -19,8 +19,8 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
-from sloptools.merge import index
-from sloptools.merge.units import Function
+from sloptools.merge import blocks, index, levels
+from sloptools.merge.units import Scan, Unit
 
 TIERS = ("exact", "renamed", "near")
 
@@ -28,13 +28,17 @@ TIERS = ("exact", "renamed", "near")
 @dataclass
 class Group:
     tier: str
-    members: list[Function]     # sorted by location
+    members: list[Unit]     # sorted by location; all functions, or all blocks
     variants: list[int]         # per member: 1-based index of its N0 form
     shapes: list[int]           # per member: 1-based index of its N1 form
     medoid: int                 # index into members
     similarity: list[float]     # per member, to the medoid
     # per member: matched (member element, medoid element) index pairs
     alignment: list[list[tuple[int, int]]] = field(repr=False)
+
+    @property
+    def unit(self) -> str:
+        return self.members[0].kind
 
     @property
     def roots(self) -> list[str]:
@@ -52,7 +56,7 @@ class Group:
         return min(others), max(others)
 
 
-def _contains(outer: Function, inner: Function) -> bool:
+def _contains(outer: Unit, inner: Unit) -> bool:
     return (outer.root, outer.rel) == (inner.root, inner.rel) and outer.lo <= inner.lo \
         and inner.hi <= outer.hi and outer.span != inner.span
 
@@ -98,28 +102,33 @@ COMMON_MIN_SHAPES = 20      # a statement in more shapes than this (or 2% of the
 COMMON_FRACTION = 0.02
 
 
-def _distinctive(shapes: list[list[Function]]) -> list[list[Function]]:
-    """Shapes with at least one statement that isn't common. A function made
-    only of statements found all over the codebase (`x = None`, `return x`,
+def _distinctive_test(shapes: list[list[Unit]]):
+    """A test for "has at least one statement that isn't common", with
+    statement frequencies taken from the function shapes. Code made only of
+    statements found all over the codebase (`x = None`, `return x`,
     `for x in y`) has nothing to recognise it by, however long it is."""
     df = Counter(k for ms in shapes for k in {e.key for e in ms[0].seq[1:] if e.node is not None})
     cap = max(COMMON_MIN_SHAPES, COMMON_FRACTION * len(shapes))
-    return [ms for ms in shapes if any(e.node is not None and df[e.key] <= cap for e in ms[0].seq[1:])]
+
+    def distinctive(elems: list[levels.Elem]) -> bool:
+        return any(e.node is not None and df[e.key] <= cap for e in elems)
+    return distinctive
 
 
-def find_groups(functions: list[Function], root_order: dict[str, int], min_statements: int,
-                min_similarity: float) -> tuple[list[Group], int]:
-    """Duplicate groups, ordered by tier, then savings, then location; and
-    the number of groups dropped as subsumed."""
-    def where(f: Function):
+def find_groups(scan: Scan, root_order: dict[str, int], min_statements: int, min_similarity: float,
+                units: tuple[str, ...] = ("functions", "blocks")) -> tuple[list[Group], int]:
+    """Duplicate groups, biggest estimated savings first, then by tier and
+    location; and the number of groups dropped as subsumed."""
+    def where(f: Unit):
         return (root_order[f.root], f.rel, f.lo, f.qualname)
 
-    by_n1: dict[str, list[Function]] = defaultdict(list)
-    for f in functions:
+    by_n1: dict[str, list[Unit]] = defaultdict(list)
+    for f in scan.functions:
         if f.statements >= min_statements:
             by_n1[f.n1].append(f)
     shapes = sorted((sorted(ms, key=where) for ms in by_n1.values()), key=lambda ms: where(ms[0]))
-    shapes = _distinctive(shapes)
+    distinctive = _distinctive_test(shapes)
+    shapes = [ms for ms in shapes if distinctive(ms[0].seq[1:])]
     keys = [[e.key for e in ms[0].seq] for ms in shapes]
     w = index.idf_weights(keys)
 
@@ -147,7 +156,7 @@ def find_groups(functions: list[Function], root_order: dict[str, int], min_state
             edges[(a, b)] = edges[(b, a)] = sim
 
     groups: list[Group] = []
-    work = _components(list(range(len(shapes))), edges) if shapes else []
+    work = _components(list(range(len(shapes))), edges) if shapes and "functions" in units else []
     while work:
         comp = work.pop(0)
         if len(comp) == 1:
@@ -169,12 +178,15 @@ def find_groups(functions: list[Function], root_order: dict[str, int], min_state
         if rest:
             work.extend(_components(rest, edges))
 
+    if "blocks" in units:
+        groups.extend(_block_group(copies, where) for copies in blocks.find(scan.bodies, min_statements, distinctive))
+
     kept_groups = [g for g in groups if not _subsumed(g, groups)]
-    kept_groups.sort(key=lambda g: (TIERS.index(g.tier), -g.savings, where(g.members[0])))
+    kept_groups.sort(key=lambda g: (-g.savings, TIERS.index(g.tier), where(g.members[0])))
     return kept_groups, len(groups) - len(kept_groups)
 
 
-def _group(shapes: list[list[Function]], comp: list[int], medoid_shape: int, score, where) -> Group:
+def _group(shapes: list[list[Unit]], comp: list[int], medoid_shape: int, score, where) -> Group:
     pick = sorted(((f, s) for s in comp for f in shapes[s]), key=lambda fs: where(fs[0]))
     members = [f for f, _ in pick]
     member_shapes = [s for _, s in pick]
@@ -201,3 +213,13 @@ def _group(shapes: list[list[Function]], comp: list[int], medoid_shape: int, sco
     return Group(tier=tier, members=members, variants=variants,
                  shapes=[shape_order.index(s) + 1 for s in member_shapes], medoid=medoid,
                  similarity=similarity, alignment=alignment)
+
+
+def _block_group(copies: list[Unit], where) -> Group:
+    members = sorted(copies, key=where)
+    n0_order = list(dict.fromkeys(u.n0 for u in members))
+    variants = [n0_order.index(u.n0) + 1 for u in members]
+    common = Counter(variants).most_common(1)[0][0]
+    return Group(tier="exact" if len(n0_order) == 1 else "renamed", members=members, variants=variants,
+                 shapes=[1] * len(members), medoid=variants.index(common), similarity=[1.0] * len(members),
+                 alignment=[[(i, i) for i in range(len(u.seq))] for u in members])
