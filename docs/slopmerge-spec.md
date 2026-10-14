@@ -372,9 +372,17 @@ without first re-deriving the facts from the source:
   share a variant number, and members with the same N1 form share a shape
   number, so a group shows which copies are verbatim and which are renamed
   copies of each other.
-- **`uses`** per member: the module globals, imported names and `self`
-  attributes it reads, and whether it is a method. This lets the skill judge
-  whether a member could move somewhere shared, and what it would drag along.
+- **`uses`** per function or block member: the names it reads but doesn't
+  bind, sorted into `imports` (module-level imports, as what they refer to:
+  `from sqlalchemy import text` used as `text` is `sqlalchemy.text`),
+  `globals` (other module-level names), `self_attrs` (attributes of the
+  method's `self` it reads or writes) and `outer` (names from an enclosing
+  function). For a block, `outer` is the extracted helper's parameter list:
+  the enclosing function's parameters and locals it reads, including a name
+  it reads before rebinding (`name = name.strip()`). Builtins are left out;
+  comprehension and lambda variables are the code's own. This lets the
+  skill judge whether a member could move somewhere shared, and what it
+  would drag along.
 - **`savings`**: an estimate of the lines removed by keeping one copy (total
   SLOC of the members minus the largest). Used for ordering, not presented
   as a promise.
@@ -403,10 +411,10 @@ without first re-deriving the facts from the source:
       "members": [
         {"id": "m1", "root": "api", "file": "db.py", "qualname": "fetch_rows",
          "lines": [12, 40], "sloc": 27, "is_method": false, "variant": 1, "shape": 1, "similarity": 1.0,
-         "uses": {"imports": ["sqlalchemy.text"], "globals": ["ENGINE"], "self_attrs": []}},
+         "uses": {"imports": ["sqlalchemy.text"], "globals": ["ENGINE"], "self_attrs": [], "outer": []}},
         {"id": "m2", "root": "worker", "file": "store.py", "qualname": "Store.load",
          "lines": [88, 119], "sloc": 30, "is_method": true, "variant": 2, "shape": 2, "similarity": 0.81,
-         "uses": {"imports": ["sqlalchemy.text"], "globals": [], "self_attrs": ["engine"]}}
+         "uses": {"imports": ["sqlalchemy.text"], "globals": [], "self_attrs": ["engine"], "outer": []}}
       ],
       "parameters": [{"kind": "literal", "values": {"m1": "users", "m2": "jobs"}, "lines": {"m1": 15, "m2": 92}, "count": 1}],
       "differences": [{"member": "m2", "change": "added", "lines": [101, 104]},

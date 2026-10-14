@@ -14,7 +14,7 @@ from pathlib import Path
 
 from sloptools.common.discover import list_python_files
 from sloptools.common.sloc import code_lines, count_in_span
-from sloptools.merge import boilerplate, levels
+from sloptools.merge import boilerplate, levels, uses
 from sloptools.merge.classes import fields_of
 
 
@@ -41,6 +41,8 @@ class Unit:
     seq: list[levels.Elem]
     boilerplate: str | None = None   # why it's not a unit (see boilerplate.reason)
     fields: dict | None = None       # a class's fields: name -> type or None (see classes.fields_of)
+    module: uses.ModuleInfo | None = None   # the file's imports and module-level names
+    method: ast.AST | None = None           # the method whose `self` counts (itself, or the block's)
 
     @property
     def span(self) -> tuple[str, str, int, int]:
@@ -49,6 +51,10 @@ class Unit:
     def bound_names(self) -> set[str]:
         own = self.nodes[0] if self.kind == "function" else None
         return levels.bound_names(self.nodes, own)
+
+    def uses(self) -> dict:
+        """What it depends on (see uses.py); functions and blocks only."""
+        return uses.uses(self.nodes, self.bound_names(), self.module, self.method)
 
 
 @dataclass
@@ -65,6 +71,8 @@ class Body:
     n1: list[str]
     weight: list[int]           # meaningful statements in each
     lines: tuple[int, ...]      # the file's code lines, for SLOC
+    module: uses.ModuleInfo | None = None
+    method: ast.AST | None = None   # the method it's in, if any
 
     def first_line(self, i: int) -> int:
         st = self.stmts[i]
@@ -77,7 +85,7 @@ class Body:
         return Unit(kind="block", root=self.root, rel=self.rel, qualname=self.qualname, lo=lo, hi=hi,
                     sloc=count_in_span(self.lines, lo, hi), is_method=self.is_method,
                     statements=sum(self.weight[i:j]), n0="|".join(self.n0[i:j]), n1="|".join(self.n1[i:j]),
-                    nodes=stmts, seq=levels.block_sequence(stmts))
+                    nodes=stmts, seq=levels.block_sequence(stmts), module=self.module, method=self.method)
 
 
 def label_roots(paths: list[Path]) -> list[Root]:
@@ -123,16 +131,20 @@ def units_in(tree: ast.Module, lines: tuple[int, ...], root: str,
     functions: list[Unit] = []
     bodies: list[Body] = []
     classes: list[Unit] = []
+    info = uses.module_info(tree)
 
-    def body(stmts: list, where: str, is_method: bool, in_function: bool = True) -> None:
+    def body(stmts: list, where: str, is_method: bool, in_function: bool = True, method: ast.AST | None = None) -> None:
         for seg in _segments(stmts):
             hashes = [levels.statement_hashes(st) for st in seg]
             bodies.append(Body(root, rel, where, is_method, in_function, seg, [h[0] for h in hashes],
-                               [h[1] for h in hashes], [levels.meaningful_count([st]) for st in seg], lines))
+                               [h[1] for h in hashes], [levels.meaningful_count([st]) for st in seg], lines,
+                               info, method))
 
-    def walk(nodes, prefix: str, in_class: bool, where: str, in_method: bool, inside: bool = False) -> None:
+    def walk(nodes, prefix: str, in_class: bool, where: str, in_method: bool, inside: bool = False,
+             method: ast.AST | None = None) -> None:
         """`prefix` names defs found here; `where` names the enclosing scope;
-        `inside` is whether that scope is a function."""
+        `inside` is whether that scope is a function; `method` is that
+        function if it's a method."""
         for n in nodes:
             if isinstance(n, ast.ClassDef):
                 lo = min([n.lineno] + [d.lineno for d in n.decorator_list])
@@ -152,17 +164,17 @@ def units_in(tree: ast.Module, lines: tuple[int, ...], root: str,
                     sloc=count_in_span(lines, lo, hi), is_method=in_class,
                     statements=levels.meaningful_statements(n),
                     n0=levels.n0_hash(n), n1=levels.n1_hash(n), nodes=[n], seq=levels.sequence(n),
-                    boilerplate=reason))
+                    boilerplate=reason, module=info, method=n if in_class else None))
                 if not reason:       # a boilerplate body is boilerplate as a block too
-                    body(n.body, qualname, in_class)
-                walk(n.body, f"{qualname}.", False, qualname, in_class, True)
+                    body(n.body, qualname, in_class, method=n if in_class else None)
+                walk(n.body, f"{qualname}.", False, qualname, in_class, True, n if in_class else None)
             else:
                 # compound statements: their bodies are statement lists too, and may hold defs
                 subs = [getattr(n, f) for f in _LIST_FIELDS if isinstance(getattr(n, f, None), list)]
                 subs += [h.body for h in (getattr(n, "handlers", None) or []) + (getattr(n, "cases", None) or [])]
                 for sub in subs:
-                    body(sub, where, in_method, in_function=inside)
-                    walk(sub, prefix, in_class, where, in_method, inside)
+                    body(sub, where, in_method, in_function=inside, method=method)
+                    walk(sub, prefix, in_class, where, in_method, inside, method)
 
     body(tree.body, "<module>", False, in_function=False)
     walk(tree.body, "", False, "<module>", False)

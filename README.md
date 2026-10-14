@@ -112,6 +112,11 @@ methods that only store their arguments, attribute-list `__eq__`/`__repr__`/
 edit"). Neither are functions made only of statements found all over the
 codebase. What was left out is counted in the JSON output.
 
+Each function or block copy also lists what it depends on (`uses`): the
+imports, module globals and `self` attributes it reads, and for a block the
+enclosing function's variables it needs, i.e. the parameters an extracted
+helper would take.
+
 See the [spec](docs/slopmerge-spec.md) for exactly how each kind of match works.
 
 ## Development

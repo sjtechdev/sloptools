@@ -30,7 +30,8 @@ def test_output_shape(run):
     assert g["id"] == "g1" and g["unit"] == "function" and g["member_count"] == 2
     assert g["members"][0] == {"id": "m1", "root": "shop", "file": "cart.py", "qualname": "total_a",
                                "lines": [2, 6], "sloc": 5, "is_method": False, "variant": 1,
-                               "shape": 1, "similarity": 1.0}
+                               "shape": 1, "similarity": 1.0,
+                               "uses": {"imports": [], "globals": [], "self_attrs": [], "outer": []}}
 
 
 def test_root_labels_are_unique(make_roots, capsys):

@@ -22,6 +22,8 @@ def _member(f: Unit, mid: str, variant: int, shape: int, similarity: float) -> d
         out["entries"] = len(constants.elements(f.nodes[0]))
     if f.kind == "class":
         out["fields"] = list(f.fields)
+    if f.kind in ("function", "block"):
+        out["uses"] = f.uses()
     return out
 
 
