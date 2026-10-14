@@ -1,6 +1,6 @@
 # slopmerge: spec
 
-> Status: draft, nothing implemented yet. Part of the `sloptools` package,
+> Status: implemented (milestones 1–5). Part of the `sloptools` package,
 > alongside `sloptrace`.
 
 slopmerge finds Python code that has been duplicated, either copied or
@@ -459,7 +459,9 @@ It is not a stable interface.
 ## Performance
 
 - **Target**: 200k SLOC across all roots in under 30 seconds on a laptop,
-  single process. Files are parsed in parallel, using one process per CPU.
+  in a single process. Currently 131k lines take about 7 seconds. Files are
+  not parsed in parallel: the target is met without it, and it isn't worth
+  the complexity.
 - **Candidate generation**: scoring every pair is quadratic, so `near`
   candidates come from an inverted index built by **prefix filtering**,
   which provably misses no pair at or above the threshold. If
@@ -534,4 +536,8 @@ It is not a stable interface.
 3. Boilerplate rules and the fixture corpus with precision and recall floors.
 4. Blocks, constants and classes.
 5. `related` tier and `uses`.
-6. Text report, performance pass, README.
+
+All done. The text report and README were kept current along the way, and
+the performance target is met in a single process, so there is no separate
+polish milestone. Possible follow-ups: near blocks (copied runs that have
+since drifted), and capping `differences` for very large near constants.
