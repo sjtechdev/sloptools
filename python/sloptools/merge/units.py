@@ -1,8 +1,8 @@
 """Roots, and the units of code inside them that can be duplicated.
 
-A unit is a function (or method), or a block: a run of statements inside any
-body. Blocks are found from `Body` records, one per statement list in a
-file (see blocks.py). Classes and constant tables come in later milestones.
+A unit is a function (or method); a block, a run of statements inside any
+body, found from `Body` records, one per statement list in a file (see
+blocks.py); or a constant table (see constants.py). Classes come later.
 """
 
 from __future__ import annotations
@@ -114,9 +114,9 @@ def _segments(stmts: list) -> list[list]:
     return out
 
 
-def units_in(tree: ast.Module, src: str, root: str, rel: str) -> tuple[list[Unit], list[Body]]:
-    """Every function in a file, and every statement list in it."""
-    lines = code_lines(src, tree)
+def units_in(tree: ast.Module, lines: tuple[int, ...], root: str, rel: str) -> tuple[list[Unit], list[Body]]:
+    """Every function in a file, and every statement list in it. `lines`
+    are the file's code lines (common.sloc.code_lines)."""
     functions: list[Unit] = []
     bodies: list[Body] = []
 
@@ -164,6 +164,7 @@ def units_in(tree: ast.Module, src: str, root: str, rel: str) -> tuple[list[Unit
 class Scan:
     functions: list[Unit]                     # function units: boilerplate left out
     bodies: list[Body]                        # statement lists, for blocks
+    constants: list[Unit]                     # literal tables
     files: dict[str, int]                     # files scanned, per root
     warnings: list[str] = field(default_factory=list)
     generated: list[str] = field(default_factory=list)       # "root:file" skipped as generated
@@ -173,7 +174,9 @@ class Scan:
 def collect(roots: list[Root], excludes: tuple[str, ...], include_tests: bool) -> Scan:
     """Every function and statement list under every root that could be
     part of a duplicate."""
-    scan = Scan(functions=[], bodies=[], files={})
+    from sloptools.merge.constants import constants_in   # it builds on Unit, defined here
+
+    scan = Scan(functions=[], bodies=[], constants=[], files={})
     for root in roots:
         rels = list_python_files(root.path, excludes, include_tests)
         scan.files[root.label] = len(rels)
@@ -187,8 +190,10 @@ def collect(roots: list[Root], excludes: tuple[str, ...], include_tests: bool) -
             if boilerplate.generated_file(rel, src, tree):
                 scan.generated.append(f"{root.label}:{rel}")
                 continue
-            functions, bodies = units_in(tree, src, root.label, rel)
+            lines = code_lines(src, tree)
+            functions, bodies = units_in(tree, lines, root.label, rel)
             scan.bodies.extend(bodies)
+            scan.constants.extend(constants_in(tree, root.label, rel, lines))
             for f in functions:
                 if f.boilerplate:
                     scan.boilerplate[f.boilerplate] += 1

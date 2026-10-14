@@ -6,7 +6,7 @@ from collections import Counter
 from typing import TextIO
 
 from sloptools import __version__
-from sloptools.merge import evidence
+from sloptools.merge import constants, evidence
 from sloptools.merge.match import TIERS, Group
 from sloptools.merge.units import Unit, Root, Scan
 
@@ -15,9 +15,28 @@ TEXT_TOP_N = 20
 
 
 def _member(f: Unit, mid: str, variant: int, shape: int, similarity: float) -> dict:
-    return {"id": mid, "root": f.root, "file": f.rel, "qualname": f.qualname,
-            "lines": [f.lo, f.hi], "sloc": f.sloc, "is_method": f.is_method,
-            "variant": variant, "shape": shape, "similarity": similarity}
+    out = {"id": mid, "root": f.root, "file": f.rel, "qualname": f.qualname,
+           "lines": [f.lo, f.hi], "sloc": f.sloc, "is_method": f.is_method,
+           "variant": variant, "shape": shape, "similarity": similarity}
+    if f.kind == "constant":
+        out["entries"] = len(constants.elements(f.nodes[0]))
+    return out
+
+
+def _parameters(g: Group, shown: list[Unit], ids: list[str], medoid: int, alignment) -> list[dict]:
+    if g.tier == "exact":
+        return []
+    if g.unit == "constant":
+        return constants.parameters(shown, ids) if g.tier == "renamed" else []
+    return evidence.parameters(shown, ids, medoid, alignment)
+
+
+def _differences(g: Group, shown: list[Unit], ids: list[str], medoid: int, alignment) -> list[dict]:
+    if g.tier != "near":
+        return []
+    if g.unit == "constant":
+        return constants.differences(shown, ids, medoid)
+    return evidence.differences(shown, ids, medoid, alignment)
 
 
 def _group(g: Group, gid: str, max_size: int) -> dict:
@@ -42,8 +61,8 @@ def _group(g: Group, gid: str, max_size: int) -> dict:
         "member_count": len(g.members),
         "members": [_member(g.members[p], i, g.variants[p], g.shapes[p], g.similarity[p])
                     for p, i in zip(picked, ids)],
-        "parameters": [] if g.tier == "exact" else evidence.parameters(shown, ids, medoid, alignment),
-        "differences": evidence.differences(shown, ids, medoid, alignment) if g.tier == "near" else [],
+        "parameters": _parameters(g, shown, ids, medoid, alignment),
+        "differences": _differences(g, shown, ids, medoid, alignment),
         "children": [],
     }
     if len(shown) < len(g.members):
@@ -62,7 +81,8 @@ def to_json(roots: list[Root], scan: Scan, groups: list[Group], subsumed: int, s
         "groups": [_group(g, f"g{i}", max_group_size) for i, g in enumerate(groups, 1)],
         "stats": {
             "files": sum(scan.files.values()),
-            "units": {"function": len(scan.functions), "statement_lists": len(scan.bodies)},
+            "units": {"function": len(scan.functions), "statement_lists": len(scan.bodies),
+                      "constant": len(scan.constants)},
             "groups_by_tier": {t: by_tier.get(t, 0) for t in TIERS},
             "subsumed": subsumed,
             "skipped": {"generated_files": scan.generated,
@@ -81,7 +101,8 @@ def print_text(result: dict, out: TextIO) -> None:
     stats = result["stats"]
     groups = result["groups"]
     w(f"\nslopmerge  {len(result['roots'])} root(s), {stats['files']} files, "
-      f"{stats['units']['function']} functions, {stats['units']['statement_lists']} statement lists\n")
+      f"{stats['units']['function']} functions, {stats['units']['statement_lists']} statement lists, "
+      f"{stats['units']['constant']} constant tables\n")
     counts = ", ".join(f"{n} {t}" for t, n in stats["groups_by_tier"].items())
     w(f"           {len(groups)} duplicate group(s): {counts}; "
       f"~{sum(g['savings'] for g in groups)} lines removable\n")
@@ -105,7 +126,11 @@ def print_text(result: dict, out: TextIO) -> None:
         if len(params) > 3:
             w(f"    ... {len(params) - 3} more differing value(s)\n")
         if g["differences"]:
-            w(f"    {len(g['differences'])} statement run(s) added, removed or changed; see --json\n")
+            if g["unit"] == "constant":
+                n = sum(len(d["values"]) for d in g["differences"])
+                w(f"    {n} entr(y/ies) added or removed between copies; see --json\n")
+            else:
+                w(f"    {len(g['differences'])} statement run(s) added, removed or changed; see --json\n")
     if len(groups) > TEXT_TOP_N:
         w(f"\n... {len(groups) - TEXT_TOP_N} more group(s); see --json\n")
     if groups:
