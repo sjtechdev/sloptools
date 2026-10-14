@@ -8,7 +8,7 @@ from typing import TextIO
 from sloptools import __version__
 from sloptools.merge import evidence
 from sloptools.merge.match import TIERS, Group
-from sloptools.merge.units import Function, Root
+from sloptools.merge.units import Function, Root, Scan
 
 SCHEMA_VERSION = 1
 TEXT_TOP_N = 20
@@ -51,22 +51,24 @@ def _group(g: Group, gid: str, max_size: int) -> dict:
     return out
 
 
-def to_json(roots: list[Root], files: dict[str, int], functions: list[Function], groups: list[Group],
-            subsumed: int, warnings: list[str], settings: dict, max_group_size: int) -> dict:
+def to_json(roots: list[Root], scan: Scan, groups: list[Group], subsumed: int, settings: dict,
+            max_group_size: int) -> dict:
     by_tier = Counter(g.tier for g in groups)
     return {
         "schema_version": SCHEMA_VERSION,
         "tool": {"name": "slopmerge", "version": __version__},
         "settings": settings,
-        "roots": [{"label": r.label, "path": str(r.path), "files": files[r.label]} for r in roots],
+        "roots": [{"label": r.label, "path": str(r.path), "files": scan.files[r.label]} for r in roots],
         "groups": [_group(g, f"g{i}", max_group_size) for i, g in enumerate(groups, 1)],
         "stats": {
-            "files": sum(files.values()),
-            "units": {"function": len(functions)},
+            "files": sum(scan.files.values()),
+            "units": {"function": len(scan.functions)},
             "groups_by_tier": {t: by_tier.get(t, 0) for t in TIERS},
             "subsumed": subsumed,
+            "skipped": {"generated_files": scan.generated,
+                        "boilerplate_functions": dict(sorted(scan.boilerplate.items()))},
         },
-        "warnings": warnings,
+        "warnings": scan.warnings,
     }
 
 
@@ -106,6 +108,11 @@ def print_text(result: dict, out: TextIO) -> None:
         w(f"\n... {len(groups) - TEXT_TOP_N} more group(s); see --json\n")
     if groups:
         w("\n  * = the most common variant, the natural one to keep\n")
+    skipped = stats["skipped"]
+    n_boiler = sum(skipped["boilerplate_functions"].values())
+    if n_boiler or skipped["generated_files"]:
+        w(f"\n  not considered: {n_boiler} boilerplate function(s), "
+          f"{len(skipped['generated_files'])} generated file(s); see 'stats.skipped' in --json\n")
     if result["warnings"]:
         w(f"\n  {len(result['warnings'])} file(s) skipped; see 'warnings' in --json\n")
     w("\n")
